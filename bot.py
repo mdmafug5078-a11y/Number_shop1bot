@@ -5,10 +5,10 @@ from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from motor.motor_asyncio import AsyncIOMotorClient
 
-# পরিবেশ থেকে সিক্রেট ডাটা রিড করা (Render বা .env ফাইল থেকে নিবে)
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-MONGO_URI = os.getenv("MONGO_URI")
-ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
+# আপনার বটের টোকেন এবং ডাটাবেজ লিংক এখানে সরাসরি সেট করা আছে
+BOT_TOKEN = "9046722307:AAEGYeQsoPeLiiwcR1Q1RvkRrdm70u8G3VE"
+MONGO_URI = "mongodb+srv://mdmafug5078_db_user:3Zw3FhgLlmUhF2sF@cluster0.gzd3tr1.mongodb.net/otp_shop_bot?retryWrites=true&w=majority"
+ADMIN_ID = 7310456453
 
 # বট ও ডাটাবেজ ইনিশিয়ালাইজেশন
 bot = Bot(token=BOT_TOKEN)
@@ -100,7 +100,7 @@ async def process_purchase(callback: types.CallbackQuery):
     await accounts_collection.update_one({"_id": account["_id"]}, {"$set": {"isSold": True}})
 
     success_text = (
-        f"🎉 অভিনন্দন! কেনাকাটা সফল হয়েছে।\n\n"
+        f"🎉 অভিনন্দন! কেনাকাটা সফল হয়েছে。\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"📱 **Number:** `{account['number']}`\n"
         f"🔑 **OTP / Code:** `{account['otp']}`\n"
