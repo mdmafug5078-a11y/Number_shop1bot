@@ -67,7 +67,6 @@ def get_main_keyboard(user_id):
 
 # --- Force Subscription & Ban Check ---
 async def check_user_access(user_id: int):
-    # চেক করা ইউজার ব্লক কি না
     user = await users_collection.find_one({"userId": user_id})
     if user and user.get("isBanned", False):
         return False, "banned"
@@ -134,38 +133,53 @@ async def process_check_sub(callback: types.CallbackQuery):
     else:
         await callback.answer("You haven't joined all required channels yet!", show_alert=True)
 
-# --- Global Middleware Check for Banned Users ---
-@dp.message()
-async def block_banned_users(message: types.Message):
-    user_id = message.from_user.id
-    user = await users_collection.find_one({"userId": user_id})
-    if user and user.get("isBanned", False):
-        return await message.answer(f"You are banned from this bot!\nFor support contact: {SUPPORT_USERNAME}")
-
 # --- User Menus ---
 @dp.message(F.text == "Profile")
 async def profile_handler(message: types.Message):
     user_id = message.from_user.id
     user = await users_collection.find_one({"userId": user_id})
+    if user and user.get("isBanned", False):
+        return await message.answer(f"You are banned from this bot!\nFor support contact: {SUPPORT_USERNAME}")
+    
     balance = user['balance'] if user else 0.0
     text = f"Account Information:\n\nName: {message.from_user.full_name}\nUser ID: `{user_id}`\nBalance: ৳{balance}"
     await message.answer(text, parse_mode="Markdown", reply_markup=get_main_keyboard(user_id))
 
 @dp.message(F.text == "Add Balance")
 async def add_balance_info(message: types.Message):
+    user_id = message.from_user.id
+    user = await users_collection.find_one({"userId": user_id})
+    if user and user.get("isBanned", False):
+        return await message.answer(f"You are banned from this bot!\nFor support contact: {SUPPORT_USERNAME}")
+        
     await message.answer(f"How to Add Balance:\nContact the admin to top up your balance.\nAdmin: {SUPPORT_USERNAME}", parse_mode="Markdown", reply_markup=get_main_keyboard(message.from_user.id))
 
 @dp.message(F.text == "Support")
 async def support_handler(message: types.Message):
+    user_id = message.from_user.id
+    user = await users_collection.find_one({"userId": user_id})
+    if user and user.get("isBanned", False):
+        return await message.answer(f"You are banned from this bot!\nFor support contact: {SUPPORT_USERNAME}")
+        
     await message.answer(f"Customer Support:\n👉 {SUPPORT_USERNAME}", parse_mode="Markdown", reply_markup=get_main_keyboard(message.from_user.id))
 
 @dp.message(F.text.in_(["My Referral", "How to Work"]))
 async def general_features(message: types.Message):
+    user_id = message.from_user.id
+    user = await users_collection.find_one({"userId": user_id})
+    if user and user.get("isBanned", False):
+        return await message.answer(f"You are banned from this bot!\nFor support contact: {SUPPORT_USERNAME}")
+        
     await message.answer(f"{message.text} feature is coming soon!", parse_mode="Markdown", reply_markup=get_main_keyboard(message.from_user.id))
 
 # --- Buy Number Menu ---
 @dp.message(F.text == "Buy Number")
 async def buy_menu(message: types.Message):
+    user_id = message.from_user.id
+    user = await users_collection.find_one({"userId": user_id})
+    if user and user.get("isBanned", False):
+        return await message.answer(f"You are banned from this bot!\nFor support contact: {SUPPORT_USERNAME}")
+
     cursor = accounts_collection.find({"isSold": False})
     accounts = await cursor.to_list(length=None)
     if not accounts:
@@ -456,7 +470,7 @@ async def process_stock_price(message: types.Message, state: FSMContext):
     await accounts_collection.insert_many(db_docs)
     await state.clear()
 
-    await message.reply(f"Added `{len(db_docs)}` numbers for **{country}** at **৳{price}** each!", parse_mode="Markdown")
+    await message.reply(f"Added `{len(db_docs)}` numbers for **{country}** at **৳{price}** each!", parse_Markdown=True)
 
     try:
         notification_text = (
