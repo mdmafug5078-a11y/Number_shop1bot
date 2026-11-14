@@ -7,12 +7,12 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from motor.motor_asyncio import AsyncIOMotorClient
 
-# --- কনফিগারেশন (আপনার দেওয়া তথ্য অনুযায়ী সেট করা) ---
-BOT_TOKEN = "9046722307:AAEGYeQsoPeLiiwcR1Q1RvkRrdm70u8G3VE"      
-CHANNEL_ID = "@QuickTaskPay"    # আপনার অফিশিয়াল চ্যানেল
+# --- কনফিগারেশন ---
+BOT_TOKEN = "9046722307:AAEGYeQsoPeLiiwcR1Q1RvkRrdm70u8G3VE"      # আপনার বটের আসল টোকেন বসান
+CHANNEL_ID = "@QuickTaskPay"    # আপনার চ্যানেল ইউজারনেম (যেমন: @earnwithmafug) - অবশ্যই বটকে চ্যানেলের Admin বানাবেন!
 ADMIN_ID = 7310456453                  # আপনার টেলিগ্রাম আইডি
 
-# MongoDB ক্লাউড ডাটাবেস কানেকশন (আপনার পাসওয়ার্ডটি বসিয়ে নিন)
+# MongoDB ক্লাউড ডাটাবেস কানেকশন (আপনার আসল পাসওয়ার্ড দিন)
 MONGO_URL = "mongodb+srv://mdmafug3016_db_user:YOUR_PASSWORD@cluster.mongodb.net/?retryWrites=true&w=majority"
 db_client = AsyncIOMotorClient(MONGO_URL)
 db = db_client["telegram_shop_db"]
@@ -20,7 +20,7 @@ db = db_client["telegram_shop_db"]
 users_col = db["users"]
 stocks_col = db["stocks"]
 
-# HTML পার্স মোড সহ বট ইনিশিয়ালাইজেশন
+# HTML পার্স মোড সহ বট ইনিশিয়ালাইজেশন (Aiogram 3.7+ সাপোর্টেড)
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
@@ -196,4 +196,63 @@ async def admin_panel(callback: CallbackQuery):
 # স্টক অ্যাড কমান্ড
 @dp.message(Command("addstock"))
 async def add_stock_command(message: types.Message):
-    if message.from_user.
+    if message.from_user.id != ADMIN_ID:
+        return
+    try:
+        data_text = message.text.replace("/addstock", "").strip()
+        parts = [p.strip() for p in data_text.split("|")]
+        if len(parts) != 5:
+            await message.reply("❌ ভুল ফরম্যাট! এভাবে দিন:\n<code>/addstock Italy | +393123456789 | 482910 | Pass123 | 1.0</code>")
+            return
+        
+        country, number, otp, password, price = parts
+        await stocks_col.insert_one({
+            "country": country,
+            "number": number,
+            "otp": otp,
+            "password": password,
+            "price": float(price)
+        })
+        await message.reply(f"✅ সফলভাবে স্টক যোগ হয়েছে!\n🌍 কান্ট্রি: <b>{country}</b>\n📱 নাম্বার: <code>{number}</code>")
+    except Exception as e:
+        await message.reply(f"❌ এরর: {e}")
+
+# ইউজারকে ব্যালেন্স দেওয়ার কমান্ড
+@dp.message(Command("addbal"))
+async def add_balance_command(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    try:
+        parts = message.text.split()
+        target_id = int(parts[1])
+        amount = float(parts[2])
+        await users_col.update_one({"user_id": target_id}, {"$inc": {"balance": amount}}, upsert=True)
+        await message.reply(f"✅ ইউজার <code>{target_id}</code> এর অ্যাকাউন্টে <b>৳{amount}</b> যোগ করা হয়েছে!")
+    except Exception:
+        await message.reply("❌ সঠিক নিয়ম: <code>/addbal 7310456453 50</code>")
+
+# অন্যান্য শর্টকাট
+@dp.callback_query(F.data == "main_menu")
+async def back_to_main(callback: CallbackQuery):
+    await send_main_menu(callback)
+
+@dp.callback_query(F.data == "profile")
+async def show_profile(callback: CallbackQuery):
+    user = await users_col.find_one({"user_id": callback.from_user.id})
+    balance = user["balance"] if user else 0.0
+    text = f"👤 <b>আপনার প্রফাইল:</b>\n\n🆔 আইডি: <code>{callback.from_user.id}</code>\n💰 ব্যালেন্স: <b>৳{balance}</b>"
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ পেছনে", callback_data="main_menu")]])
+    await callback.message.edit_text(text, reply_markup=keyboard)
+
+@dp.callback_query(F.data == "add_balance")
+async def add_balance_prompt(callback: CallbackQuery):
+    await callback.message.edit_text("💳 ব্যালেন্স রিচার্জ করতে এডমিনের সাথে যোগাযোগ করুন।", 
+                                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⬅️ পেছনে", callback_data="main_menu")]]))
+
+async def main():
+    logging.basicConfig(level=logging.INFO)
+    print("Bot is running smoothly...")
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
