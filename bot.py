@@ -52,12 +52,12 @@ class UpdatePriceState(StatesGroup):
 # --- Main Menu Keyboard ---
 def get_main_keyboard(user_id):
     buttons = [
-        [KeyboardButton(text="👤 Profile"), KeyboardButton(text="🛒 Buy Number")],
-        [KeyboardButton(text="💰 Add Balance"), KeyboardButton(text="🛠️ Support")],
-        [KeyboardButton(text="👥 My Referral"), KeyboardButton(text="📘 How to Work")]
+        [KeyboardButton(text="Profile"), KeyboardButton(text="Buy Number")],
+        [KeyboardButton(text="Add Balance"), KeyboardButton(text="Support")],
+        [KeyboardButton(text="My Referral"), KeyboardButton(text="How to Work")]
     ]
     if user_id == ADMIN_ID:
-        buttons.append([KeyboardButton(text="⚙️ Admin Panel")])
+        buttons.append([KeyboardButton(text="Admin Panel")])
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
 # --- Force Subscription Check ---
@@ -87,9 +87,9 @@ async def cmd_start(message: types.Message, state: FSMContext):
     is_subbed, unjoined = await check_user_subscriptions(user_id)
     
     if not is_subbed:
-        inline_buttons = [[InlineKeyboardButton(text=f"📢 {ch['name']}", url=ch['invite_link'])] for ch in unjoined]
-        inline_buttons.append([InlineKeyboardButton(text="✅ Joined, Check Again", callback_data="check_subscription")])
-        await message.answer("⚠️ You must join our official channels to use this bot.", reply_markup=InlineKeyboardMarkup(inline_keyboard=inline_buttons))
+        inline_buttons = [[InlineKeyboardButton(text=f"Join {ch['name']}", url=ch['invite_link'])] for ch in unjoined]
+        inline_buttons.append([InlineKeyboardButton(text="Joined, Check Again", callback_data="check_subscription")])
+        await message.answer("You must join our official channels to use this bot.", reply_markup=InlineKeyboardMarkup(inline_keyboard=inline_buttons))
         return
 
     user = await users_collection.find_one({"userId": user_id})
@@ -98,11 +98,11 @@ async def cmd_start(message: types.Message, state: FSMContext):
         user = {"balance": 0.0}
 
     caption = (
-        f"🔥 **Welcome to Number Shop, EARN WITH MAFUG!** ✨\n\n"
-        f"💰 **Your Balance:** ৳{user['balance']}\n"
-        f"🆔 **User ID:** `{user_id}`\n\n"
-        f"🎁 Instant automated accounts & OTP delivery.\n"
-        f"🚀 Start shopping today!"
+        f"Welcome to Number Shop, EARN WITH MAFUG!\n\n"
+        f"Your Balance: ৳{user['balance']}\n"
+        f"User ID: `{user_id}`\n\n"
+        f"Instant automated accounts & OTP delivery.\n"
+        f"Start shopping today!"
     )
     await message.answer(caption, parse_mode="Markdown", reply_markup=get_main_keyboard(user_id))
 
@@ -116,49 +116,49 @@ async def process_check_sub(callback: types.CallbackQuery):
         if not user:
             await users_collection.insert_one({"userId": user_id, "balance": 0.0})
             user = {"balance": 0.0}
-        caption = f"🎉 **Welcome back!**\n💰 **Your Balance:** ৳{user.get('balance', 0.0)}"
+        caption = f"Welcome back!\nYour Balance: ৳{user.get('balance', 0.0)}"
         await callback.message.answer(caption, parse_mode="Markdown", reply_markup=get_main_keyboard(user_id))
     else:
-        await callback.answer("❌ You haven't joined all required channels yet!", show_alert=True)
+        await callback.answer("You haven't joined all required channels yet!", show_alert=True)
 
 # --- User Menus ---
-@dp.message(F.text == "👤 Profile")
+@dp.message(F.text == "Profile")
 async def profile_handler(message: types.Message):
     user_id = message.from_user.id
     user = await users_collection.find_one({"userId": user_id})
     balance = user['balance'] if user else 0.0
-    text = f"👤 **Account Information:**\n\n🔸 **Name:** {message.from_user.full_name}\n🔸 **User ID:** `{user_id}`\n🔸 **Balance:** ৳{balance}"
+    text = f"Account Information:\n\nName: {message.from_user.full_name}\nUser ID: `{user_id}`\nBalance: ৳{balance}"
     await message.answer(text, parse_mode="Markdown", reply_markup=get_main_keyboard(user_id))
 
-@dp.message(F.text == "💰 Add Balance")
+@dp.message(F.text == "Add Balance")
 async def add_balance_info(message: types.Message):
-    await message.answer("💳 **How to Add Balance:**\nContact the admin to top up your balance.\n📞 **Admin:** @mh_mafug", parse_mode="Markdown", reply_markup=get_main_keyboard(message.from_user.id))
+    await message.answer("How to Add Balance:\nContact the admin to top up your balance.\nAdmin: @mh_mafug", parse_mode="Markdown", reply_markup=get_main_keyboard(message.from_user.id))
 
-@dp.message(F.text == "🛠️ Support")
+@dp.message(F.text == "Support")
 async def support_handler(message: types.Message):
-    await message.answer("🛠️ **Customer Support:**\n👉 @QuickTaskPay", parse_mode="Markdown", reply_markup=get_main_keyboard(message.from_user.id))
+    await message.answer("Customer Support:\n👉 @QuickTaskPay", parse_mode="Markdown", reply_markup=get_main_keyboard(message.from_user.id))
 
-@dp.message(F.text.in_(["👥 My Referral", "📘 How to Work"]))
+@dp.message(F.text.in_(["My Referral", "How to Work"]))
 async def general_features(message: types.Message):
-    await message.answer(f"✨ **{message.text}** feature is coming soon!", parse_mode="Markdown", reply_markup=get_main_keyboard(message.from_user.id))
+    await message.answer(f"{message.text} feature is coming soon!", parse_mode="Markdown", reply_markup=get_main_keyboard(message.from_user.id))
 
 # --- Buy Number Menu ---
-@dp.message(F.text == "🛒 Buy Number")
+@dp.message(F.text == "Buy Number")
 async def buy_menu(message: types.Message):
     cursor = accounts_collection.find({"isSold": False})
     accounts = await cursor.to_list(length=None)
     if not accounts:
-        return await message.answer("❌ Sorry, no stock available right now!")
+        return await message.answer("Sorry, no stock available right now!")
 
     countries = list(set(acc["country"] for acc in accounts))
     inline_buttons = []
     for country in countries:
         count = sum(1 for acc in accounts if acc["country"] == country)
         sample = next(acc for acc in accounts if acc["country"] == country)
-        inline_buttons.append([InlineKeyboardButton(text=f"🌍 {country} • ৳{sample['price']} • Stock: ({count})", callback_data=f"buy_country_{country}")])
+        inline_buttons.append([InlineKeyboardButton(text=f"{country} • ৳{sample['price']} • Stock: ({count})", callback_data=f"buy_country_{country}")])
     
-    inline_buttons.append([InlineKeyboardButton(text="🔙 Main Menu", callback_data="back_to_menu")])
-    await message.answer("🌐 **Select Country to Buy:**", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(inline_keyboard=inline_buttons))
+    inline_buttons.append([InlineKeyboardButton(text="Main Menu", callback_data="back_to_menu")])
+    await message.answer("Select Country to Buy:", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(inline_keyboard=inline_buttons))
 
 @dp.callback_query(F.data.startswith("buy_country_"))
 async def process_purchase(callback: types.CallbackQuery):
@@ -168,21 +168,21 @@ async def process_purchase(callback: types.CallbackQuery):
     account = await accounts_collection.find_one({"country": country, "isSold": False})
 
     if not account:
-        return await callback.answer("❌ Stock out for this country!", show_alert=True)
+        return await callback.answer("Stock out for this country!", show_alert=True)
     if user["balance"] < account["price"]:
-        return await callback.answer(f"❌ Insufficient balance! Required: ৳{account['price']}", show_alert=True)
+        return await callback.answer(f"Insufficient balance! Required: ৳{account['price']}", show_alert=True)
 
     await users_collection.update_one({"userId": user_id}, {"$inc": {"balance": -account["price"]}})
     await accounts_collection.update_one({"_id": account["_id"]}, {"$set": {"isSold": True}})
 
     success_text = (
-        f"✅ **Purchase Successful!**\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📱 **Number:** `{account['number']}`\n"
-        f"🔑 **OTP / Code:** `{account['otp']}`\n"
-        f"🔒 **Password:** `{account['password']}`\n"
-        f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"⚠️ Please use the account within 24 hours."
+        f"Purchase Successful!\n\n"
+        f"-----------------------------------------\n"
+        f"Number: `{account['number']}`\n"
+        f"OTP / Code: `{account['otp']}`\n"
+        f"Password: `{account['password']}`\n"
+        f"-----------------------------------------\n"
+        f"Please use the account within 24 hours."
     )
     await callback.message.edit_text(success_text, parse_mode="Markdown")
     await callback.answer()
@@ -190,28 +190,28 @@ async def process_purchase(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "back_to_menu")
 async def back_to_menu(callback: types.CallbackQuery):
     await callback.message.delete()
-    await callback.message.answer("🏠 **Main Menu:**", parse_mode="Markdown", reply_markup=get_main_keyboard(callback.from_user.id))
+    await callback.message.answer("Main Menu:", parse_mode="Markdown", reply_markup=get_main_keyboard(callback.from_user.id))
     await callback.answer()
 
 # --- ADMIN PANEL & NUMBER MANAGEMENT ---
-@dp.message(F.text == "⚙️ Admin Panel")
+@dp.message(F.text == "Admin Panel")
 async def admin_panel_button(message: types.Message):
     if message.from_user.id != ADMIN_ID:
-        return await message.answer("⛔ Access Denied!")
+        return await message.answer("Access Denied!")
     
     admin_markup = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="📦 Number Management", callback_data="admin_stock")],
-            [InlineKeyboardButton(text="📢 Manage Channels", callback_data="admin_channels"), InlineKeyboardButton(text="💳 Payment System", callback_data="admin_pay")],
-            [InlineKeyboardButton(text="📊 Bot Status", callback_data="admin_status")]
+            [InlineKeyboardButton(text="Number Management", callback_data="admin_stock")],
+            [InlineKeyboardButton(text="Manage Channels", callback_data="admin_channels"), InlineKeyboardButton(text="Payment System", callback_data="admin_pay")],
+            [InlineKeyboardButton(text="Bot Status", callback_data="admin_status")]
         ]
     )
-    await message.answer("👑 **ADMIN PANEL**\n═════════════════════", parse_mode="Markdown", reply_markup=admin_markup)
+    await message.answer("ADMIN PANEL\n-----------------------------------------", parse_mode="Markdown", reply_markup=admin_markup)
 
 @dp.callback_query(F.data == "admin_stock")
 async def admin_number_management(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
-        return await callback.answer("⛔ Unauthorized!", show_alert=True)
+        return await callback.answer("Unauthorized!", show_alert=True)
     
     cursor = accounts_collection.find({})
     accounts = await cursor.to_list(length=None)
@@ -222,12 +222,12 @@ async def admin_number_management(callback: types.CallbackQuery):
     for country in countries:
         total = sum(1 for acc in accounts if acc["country"] == country)
         sold = sum(1 for acc in accounts if acc["country"] == country and acc["isSold"] == True)
-        inline_buttons.append([InlineKeyboardButton(text=f"🌍 {country} [Total: {total}, Sold: {sold}]", callback_data=f"manage_country_{country}")])
+        inline_buttons.append([InlineKeyboardButton(text=f"{country} [Total: {total}, Sold: {sold}]", callback_data=f"manage_country_{country}")])
         
-    inline_buttons.append([InlineKeyboardButton(text="➕ Add New Country Stock", callback_data="add_stock_start")])
-    inline_buttons.append([InlineKeyboardButton(text="🔙 Back to Admin", callback_data="admin_back")])
+    inline_buttons.append([InlineKeyboardButton(text="Add New Country Stock", callback_data="add_stock_start")])
+    inline_buttons.append([InlineKeyboardButton(text="Back to Admin", callback_data="admin_back")])
     
-    await callback.message.edit_text("📦 **Number Management**\nSelect a country to manage or add new stock:", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(inline_keyboard=inline_buttons))
+    await callback.message.edit_text("Number Management\nSelect a country to manage or add new stock:", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(inline_keyboard=inline_buttons))
     await callback.answer()
 
 # --- Interactive Add Stock Flow ---
@@ -236,7 +236,7 @@ async def start_add_stock(callback: types.CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
         return
     await state.set_state(AddStockState.waiting_for_country)
-    await callback.message.answer("📝 Please enter the **Country Name** (e.g., TikTok / Bangladesh / Italy):", parse_mode="Markdown")
+    await callback.message.answer("Please enter the Country Name (e.g., TikTok / Bangladesh / Italy):", parse_mode="Markdown")
     await callback.answer()
 
 @dp.message(AddStockState.waiting_for_country)
@@ -245,7 +245,7 @@ async def process_country_name(message: types.Message, state: FSMContext):
         return
     await state.update_data(country=message.text.strip())
     await state.set_state(AddStockState.waiting_for_file)
-    await message.answer("📁 Now send the text file (.txt) or text containing numbers, OTP, and passwords.\nFormat per line: `Number Tab OTP Tab Password` (as shown in your screenshot).", parse_mode="Markdown")
+    await message.answer("Now send the text file (.txt) or text containing numbers, OTP, and passwords.\nFormat per line: `Number Tab OTP Tab Password`.", parse_mode="Markdown")
 
 @dp.message(AddStockState.waiting_for_file)
 async def process_stock_file(message: types.Message, state: FSMContext):
@@ -269,11 +269,11 @@ async def process_stock_file(message: types.Message, state: FSMContext):
             parsed_items.append({"number": parts[0], "otp": parts[1], "password": parts[2]})
 
     if not parsed_items:
-        return await message.reply("❌ Invalid format! Please send valid data.")
+        return await message.reply("Invalid format! Please send valid data.")
 
     await state.update_data(items=parsed_items)
     await state.set_state(AddStockState.waiting_for_price)
-    await message.reply(f"✅ Successfully read `{len(parsed_items)}` numbers.\n💰 Now enter the **Price per Number** in BDT (e.g., 0.80 or 1.00):", parse_mode="Markdown")
+    await message.reply(f"Successfully read `{len(parsed_items)}` numbers.\nNow enter the Price per Number in BDT (e.g., 0.80 or 1.00):", parse_mode="Markdown")
 
 @dp.message(AddStockState.waiting_for_price)
 async def process_stock_price(message: types.Message, state: FSMContext):
@@ -282,7 +282,7 @@ async def process_stock_price(message: types.Message, state: FSMContext):
     try:
         price = float(message.text.strip())
     except ValueError:
-        return await message.reply("❌ Invalid price! Please enter a number.")
+        return await message.reply("Invalid price! Please enter a number.")
 
     data = await state.get_data()
     country = data.get("country")
@@ -303,17 +303,17 @@ async def process_stock_price(message: types.Message, state: FSMContext):
     await accounts_collection.insert_many(db_docs)
     await state.clear()
 
-    await message.reply(f"✅ Added `{len(db_docs)}` numbers for **{country}`} at **৳{price}** each!", parse_mode="Markdown")
+    await message.reply(f"Added `{len(db_docs)}` numbers for **{country}** at **৳{price}** each!", parse_mode="Markdown")
 
     # Send Notification to Channel with 'Buy Number' Button
     try:
         notification_text = (
-            f"🇳🇬 | <b>{country}</b>\n"
+            f"<b>{country}</b>\n"
             f"TOTALL : {len(db_docs)} Numbers\n"
             f"OTP Rate: {price:.2f} BDT"
         )
         channel_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🚀 Buy Number", url=f"https://t.me/{(await bot.get_me()).username}")]
+            [InlineKeyboardButton(text="Buy Number", url=f"https://t.me/{(await bot.get_me()).username}")]
         ])
         await bot.send_message(NOTIFICATION_CHANNEL, notification_text, parse_mode="HTML", reply_markup=channel_keyboard)
     except Exception as e:
@@ -323,7 +323,7 @@ async def process_stock_price(message: types.Message, state: FSMContext):
 @dp.callback_query(F.data.startswith("manage_country_"))
 async def manage_single_country(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
-        return await callback.answer("⛔ Unauthorized!", show_alert=True)
+        return await callback.answer("Unauthorized!", show_alert=True)
     
     country = callback.data.replace("manage_country_", "")
     total = await accounts_collection.count_documents({"country": country})
@@ -334,17 +334,17 @@ async def manage_single_country(callback: types.CallbackQuery):
     price = sample["price"] if sample else 0.0
 
     text = (
-        f"🌍 **Country:** {country}\n"
-        f"💰 **Current Price:** ৳{price}\n"
-        f"📦 **Total Stock:** {total}\n"
-        f"🛒 **Available:** {available}\n"
-        f"✅ **Sold:** {sold}"
+        f"Country: {country}\n"
+        f"Current Price: ৳{price}\n"
+        f"Total Stock: {total}\n"
+        f"Available: {available}\n"
+        f"Sold: {sold}"
     )
 
     markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Stock Add", callback_data=f"m_add_{country}"), InlineKeyboardButton(text="💲 Price Change", callback_data=f"m_price_{country}")],
-        [InlineKeyboardButton(text="🗑️ Delete Number", callback_data=f"m_del_{country}")],
-        [InlineKeyboardButton(text="🔙 Back to List", callback_data="admin_stock")]
+        [InlineKeyboardButton(text="Stock Add", callback_data=f"m_add_{country}"), InlineKeyboardButton(text="Price Change", callback_data=f"m_price_{country}")],
+        [InlineKeyboardButton(text="Delete Number", callback_data=f"m_del_{country}")],
+        [InlineKeyboardButton(text="Back to List", callback_data="admin_stock")]
     ])
     await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=markup)
     await callback.answer()
@@ -366,13 +366,13 @@ async def apply_new_price(message: types.Message, state: FSMContext):
     try:
         new_price = float(message.text.strip())
     except ValueError:
-        return await message.reply("❌ Invalid price!")
+        return await message.reply("Invalid price!")
 
     data = await state.get_data()
     country = data.get("target_country")
     await accounts_collection.update_many({"country": country}, {"$set": {"price": new_price}})
     await state.clear()
-    await message.reply(f"✅ Price updated to ৳{new_price} for all **{country}** accounts!", parse_mode="Markdown")
+    await message.reply(f"Price updated to ৳{new_price} for all **{country}** accounts!", parse_mode="Markdown")
 
 @dp.callback_query(F.data.startswith("m_del_"))
 async def confirm_delete_country(callback: types.CallbackQuery):
@@ -380,10 +380,10 @@ async def confirm_delete_country(callback: types.CallbackQuery):
         return
     country = callback.data.replace("m_del_", "")
     markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⚠️ Yes, Delete All", callback_data=f"confirm_del_{country}")],
-        [InlineKeyboardButton(text="❌ Cancel", callback_data=f"manage_country_{country}")]
+        [InlineKeyboardButton(text="Yes, Delete All", callback_data=f"confirm_del_{country}")],
+        [InlineKeyboardButton(text="Cancel", callback_data=f"manage_country_{country}")]
     ])
-    await callback.message.edit_text(f"⚠️ Are you sure you want to delete all unsold stock for **{country}**?", parse_mode="Markdown", reply_markup=markup)
+    await callback.message.edit_text(f"Are you sure you want to delete all unsold stock for **{country}**?", parse_mode="Markdown", reply_markup=markup)
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("confirm_del_"))
@@ -392,7 +392,7 @@ async def execute_delete_country(callback: types.CallbackQuery):
         return
     country = callback.data.replace("confirm_del_", "")
     await accounts_collection.delete_many({"country": country, "isSold": False})
-    await callback.message.edit_text(f"✅ Unsold stock for **{country}** has been removed successfully!", parse_mode="Markdown")
+    await callback.message.edit_text(f"Unsold stock for **{country}** has been removed successfully!", parse_mode="Markdown")
     await callback.answer()
 
 @dp.callback_query(F.data == "admin_back")
@@ -400,15 +400,15 @@ async def admin_back(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         return
     admin_markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📦 Number Management", callback_data="admin_stock")],
-        [InlineKeyboardButton(text="📢 Manage Channels", callback_data="admin_channels"), InlineKeyboardButton(text="💳 Payment System", callback_data="admin_pay")],
-        [InlineKeyboardButton(text="📊 Bot Status", callback_data="admin_status")]
+        [InlineKeyboardButton(text="Number Management", callback_data="admin_stock")],
+        [InlineKeyboardButton(text="Manage Channels", callback_data="admin_channels"), InlineKeyboardButton(text="Payment System", callback_data="admin_pay")],
+        [InlineKeyboardButton(text="Bot Status", callback_data="admin_status")]
     ])
-    await callback.message.edit_text("👑 **ADMIN PANEL**\n═════════════════════", parse_mode="Markdown", reply_markup=admin_markup)
+    await callback.message.edit_text("ADMIN PANEL\n-----------------------------------------", parse_mode="Markdown", reply_markup=admin_markup)
     await callback.answer()
 
 async def main():
-    print("🚀 Bot is running with Advanced Number Management...")
+    print("Bot is running smoothly...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
