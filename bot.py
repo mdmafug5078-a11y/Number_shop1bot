@@ -34,8 +34,9 @@ client = AsyncIOMotorClient(MONGO_URI)
 db = client["otp_shop_bot"]
 users_collection = db["users"]
 accounts_collection = db["accounts"]
+channels_collection = db["channels"]  # ফোর্স সাবস্ক্রিপশন চ্যানেলের জন্য ডাটাবেস কালেকশন
 
-# --- Main Menu Keyboard (English & Premium Style) ---
+# --- Main Menu Keyboard ---
 def get_main_keyboard(user_id):
     buttons = [
         [KeyboardButton(text="👤 Profile"), KeyboardButton(text="🛒 Buy Number")],
@@ -49,12 +50,58 @@ def get_main_keyboard(user_id):
         
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
-# --- Start Command ---
+# --- Check User Subscription for All Admin Channels ---
+async def check_user_subscriptions(user_id: int):
+    if user_id == ADMIN_ID:
+        return True, []
+    
+    cursor = channels_collection.find({})
+    channels = await cursor.to_list(length=None)
+    
+    if not channels:
+        return True, []  # যদি কোনো চ্যানেল সেট করা না থাকে, তবে সবাই ঢুকতে পারবে
+        
+    not_joined = []
+    for ch in channels:
+        chat_id = ch["chat_id"]  # যেমন: @QuickTaskPay অথবা চ্যানেল আইডি
+        try:
+            member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+            if member.status not in ["member", "creator", "administrator"]:
+                not_joined.append(ch)
+        except Exception:
+            # যদি বট চ্যানেলে এডমিন না থাকে বা অন্য কোনো এরর হয়
+            not_joined.append(ch)
+            
+    if not_joined:
+        return False, not_joined
+    return True, []
+
+# --- Start Command & Force Subscription Handler ---
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
-    user = await users_collection.find_one({"userId": user_id})
     
+    # সাবস্ক্রিপশন চেক করা
+    is_subbed, unjoined_channels = await check_user_subscriptions(user_id)
+    
+    if not is_subbed:
+        inline_buttons = []
+        for ch in unjoined_channels:
+            inline_buttons.append([InlineKeyboardButton(text=f"📢 Join {ch['name']}", url=ch['invite_link'])])
+        
+        inline_buttons.append([InlineKeyboardButton(text="✅ Joined, Check Again", callback_data="check_subscription")])
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=inline_buttons)
+        text = (
+            "⚠️ **Access Denied!**\n\n"
+            "You must join our official channels below to use this bot. "
+            "After joining all channels, click the check button."
+        )
+        await message.answer(text, parse_mode="Markdown", reply_markup=keyboard)
+        return
+
+    # ইউজার ডাটাবেসে না থাকলে রেজিস্টার করা
+    user = await users_collection.find_one({"userId": user_id})
     if not user:
         user = {"userId": user_id, "balance": 0.0}
         await users_collection.insert_one(user)
@@ -68,6 +115,28 @@ async def cmd_start(message: types.Message):
     )
     
     await message.answer(caption, parse_mode="Markdown", reply_markup=get_main_keyboard(user_id))
+
+# --- Check Join Callback ---
+@dp.callback_query(F.data == "check_subscription")
+async def process_check_subscription(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    is_subbed, _ = await check_user_subscriptions(user_id)
+    
+    if is_subbed:
+        await callback.message.delete()
+        user = await users_collection.find_one({"userId": user_id})
+        if not user:
+            await users_collection.insert_one({"userId": user_id, "balance": 0.0})
+            user = {"balance": 0.0}
+            
+        caption = (
+            f"🎉 **Thank you for joining! Welcome back.** ✨\n\n"
+            f"💰 **Your Balance:** ৳{user.get('balance', 0.0)}\n"
+            f"🆔 **User ID:** `{user_id}`"
+        )
+        await callback.message.answer(caption, parse_mode="Markdown", reply_markup=get_main_keyboard(user_id))
+    else:
+        await callback.answer("❌ You haven't joined all required channels yet!", show_alert=True)
 
 # --- User Menus ---
 @dp.message(F.text == "👤 Profile")
@@ -182,15 +251,13 @@ async def back_to_menu(callback: types.CallbackQuery):
 @dp.message(F.text == "⚙️ Admin Panel")
 async def admin_panel_button(message: types.Message):
     if message.from_user.id != ADMIN_ID:
-        return await message.answer("⛔ Access Denied! You are not the authorized administrator.")
+        return await message.answer("⛔ Access Denied!")
     
     admin_markup = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="📊 Bot Status", callback_data="admin_status"), InlineKeyboardButton(text="📢 Broadcast", callback_data="admin_broadcast")],
+            [InlineKeyboardButton(text="📢 Channel Management", callback_data="admin_channels")],
             [InlineKeyboardButton(text="📦 Number Management", callback_data="admin_stock"), InlineKeyboardButton(text="💳 Payment System", callback_data="admin_pay")],
-            [InlineKeyboardButton(text="⚙️ Bot Settings", callback_data="admin_settings"), InlineKeyboardButton(text="🗑️ Clear History", callback_data="admin_clear")],
-            [InlineKeyboardButton(text="🚫 Ban/Unban User", callback_data="admin_ban"), InlineKeyboardButton(text="👥 Referral Mgmt", callback_data="admin_ref")],
-            [InlineKeyboardButton(text="🗄️ Database Management", callback_data="admin_db")]
+            [InlineKeyboardButton(text="📊 Bot Status", callback_data="admin_status"), InlineKeyboardButton(text="🗑️ Clear History", callback_data="admin_clear")]
         ]
     )
     
@@ -201,25 +268,99 @@ async def admin_panel_button(message: types.Message):
     )
     await message.answer(admin_text, parse_mode="Markdown", reply_markup=admin_markup)
 
+@dp.callback_query(F.data == "admin_channels")
+async def admin_channels_menu(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        return await callback.answer("⛔ Unauthorized!", show_alert=True)
+        
+    cursor = channels_collection.find({})
+    channels = await cursor.to_list(length=None)
+    
+    ch_list = "\n".join([f"• <b>{ch['name']}</b> ({ch['chat_id']})" for ch in channels]) if channels else "No channels added yet."
+    
+    text = (
+        f"📢 <b>Channel Force-Sub Management</b>\n\n"
+        f"<b>Current Channels:</b>\n{ch_list}\n\n"
+        f"<b>Commands to Add/Remove:</b>\n"
+        f"➕ Add Channel:\n<code>/addchannel [Name] | [ChatID/Username] | [InviteLink]</code>\n"
+        f"➖ Remove Channel:\n<code>/delchannel [ChatID/Username]</code>"
+    )
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Back to Admin", callback_data="admin_back")]
+    ])
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+    await callback.answer()
+
+@dp.callback_query(F.data == "admin_back")
+async def admin_back(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    admin_markup = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📢 Channel Management", callback_data="admin_channels")],
+            [InlineKeyboardButton(text="📦 Number Management", callback_data="admin_stock"), InlineKeyboardButton(text="💳 Payment System", callback_data="admin_pay")],
+            [InlineKeyboardButton(text="📊 Bot Status", callback_data="admin_status"), InlineKeyboardButton(text="🗑️ Clear History", callback_data="admin_clear")]
+        ]
+    )
+    await callback.message.edit_text("👑 **ADMIN PANEL**\n═════════════════════\nSelect an option below:", parse_mode="Markdown", reply_markup=admin_markup)
+    await callback.answer()
+
 @dp.callback_query(F.data.startswith("admin_"))
 async def admin_inline_actions(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         return await callback.answer("⛔ Unauthorized!", show_alert=True)
     
     action = callback.data.split("_")[1]
-    
     if action == "status":
-        await callback.message.answer("📊 **Bot Status:**\n\nServer is running smoothly 24/7 with zero downtime.", parse_mode="Markdown")
+        await callback.message.answer("📊 **Bot Status:**\n\nServer is running smoothly 24/7.", parse_mode="Markdown")
     elif action == "stock":
-        await callback.message.answer("📦 **Number Management Guide:**\n\nTo add stock, send this command:\n`/addfb [Country] [Price] [Number] [OTP] [Password]`", parse_mode="Markdown")
+        await callback.message.answer("📦 **To add stock, send:**\n`/addfb [Country] [Price] [Number] [OTP] [Password]`", parse_mode="Markdown")
     elif action == "pay":
-        await callback.message.answer("💳 **Payment System Guide:**\n\nTo add balance to a user, send this command:\n`/addbal [UserId] [Amount]`", parse_mode="Markdown")
+        await callback.message.answer("💳 **To add balance, send:**\n`/addbal [UserId] [Amount]`", parse_mode="Markdown")
     else:
-        await callback.message.answer(f"⚙️ **{action.capitalize()} Management:**\n\nThis feature is currently active and ready for configuration.", parse_mode="Markdown")
-    
+        await callback.message.answer("⚙️ Feature active.", parse_mode="Markdown")
     await callback.answer()
 
-# Direct Admin Commands
+# --- Admin Commands for Channels ---
+@dp.message(Command("addchannel"))
+async def admin_add_channel(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    try:
+        data_text = message.text.replace("/addchannel", "").strip()
+        parts = [p.strip() for p in data_text.split("|")]
+        if len(parts) != 3:
+            return await message.reply("⚠️ Format: `/addchannel ChannelName | @UsernameOrID | https://t.me/...`", parse_mode="Markdown")
+            
+        name, chat_id, invite_link = parts
+        await channels_collection.update_one(
+            {"chat_id": chat_id},
+            {"$set": {"name": name, "chat_id": chat_id, "invite_link": invite_link}},
+            upsert=True
+        )
+        await message.reply(f"✅ Channel <b>{name}</b> added successfully!", parse_mode="HTML")
+    except Exception as e:
+        await message.reply(f"❌ Error: {e}")
+
+@dp.message(Command("delchannel"))
+async def admin_del_channel(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    try:
+        chat_id = message.text.replace("/delchannel", "").strip()
+        if not chat_id:
+            return await message.reply("⚠️ Provide chat ID/Username. Example: `/delchannel @QuickTaskPay`", parse_mode="Markdown")
+            
+        result = await channels_collection.delete_one({"chat_id": chat_id})
+        if result.deleted_count > 0:
+            await message.reply(f"✅ Channel `{chat_id}` removed successfully!", parse_mode="Markdown")
+        else:
+            await message.reply(f"❌ Channel `{chat_id}` not found in database.", parse_mode="Markdown")
+    except Exception as e:
+        await message.reply(f"❌ Error: {e}")
+
+# Direct Admin Commands for Stock & Balance
 @dp.message(Command("addfb"))
 async def admin_add_stock(message: types.Message):
     if message.from_user.id != ADMIN_ID:
@@ -260,7 +401,7 @@ async def admin_add_balance(message: types.Message):
     await message.reply(f"✅ Successfully added ৳{amount} to User `{target_user}`.")
 
 async def main():
-    print("🚀 Secure Python Bot is running...")
+    print("🚀 Secure Python Bot with Dynamic Channels is running...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
