@@ -33,10 +33,6 @@ MONGO_URI = "mongodb+srv://mdmafug5078_db_user:3Zw3FhgLlmUhF2sF@cluster0.gzd3tr1
 ADMIN_ID = 7310456453  # Your Fixed Admin ID
 NOTIFICATION_CHANNEL = "@QuickTaskPay"  # যে চ্যানেলে স্টক অ্যাড হলে নোটিফিকেশন যাবে
 SUPPORT_USERNAME = "@mh_mafug" # সাপোর্টের ইউজারনেম
-
-# ডিপোজিট নাম্বার কনফিগারেশন
-BKASH_NUMBER = "01712345678"
-NAGAD_NUMBER = "01812345678"
 MIN_DEPOSIT = 50.0
 
 bot = Bot(token=BOT_TOKEN)
@@ -48,6 +44,7 @@ users_collection = db["users"]
 accounts_collection = db["accounts"]
 channels_collection = db["channels"]
 deposits_collection = db["deposits"]
+settings_collection = db["settings"] # সেটিংসের জন্য কালেকশন
 
 # --- FSM States ---
 class AddStockState(StatesGroup):
@@ -64,6 +61,19 @@ class BalanceActionState(StatesGroup):
 class DepositState(StatesGroup):
     waiting_for_amount = State()
     waiting_for_trxid = State()
+
+class PaymentSettingsState(StatesGroup):
+    waiting_for_bkash = State()
+    waiting_for_nagad = State()
+
+# --- Helper Functions for Settings ---
+async def get_payment_numbers():
+    settings = await settings_collection.find_one({"type": "payment_numbers"})
+    if not settings:
+        default_settings = {"type": "payment_numbers", "bkash": "01712345678", "nagad": "01812345678"}
+        await settings_collection.insert_one(default_settings)
+        return default_settings["bkash"], default_settings["nagad"]
+    return settings.get("bkash", "01712345678"), settings.get("nagad", "01812345678")
 
 # --- Main Menu Keyboard ---
 def get_main_keyboard(user_id):
@@ -190,11 +200,14 @@ async def process_deposit_amount(message: types.Message, state: FSMContext):
     await state.update_data(deposit_amount=amount)
     await state.set_state(DepositState.waiting_for_trxid)
 
+    # ডাটাবেস থেকে বর্তমান বিকাশ ও নগদ নাম্বার ফেচ করা
+    bkash_num, nagad_num = await get_payment_numbers()
+
     text = (
         f"Deposit Amount: {amount} BDT\n\n"
         f"Please Send Money to our numbers below:\n\n"
-        f"bKash (Personal): `{BKASH_NUMBER}`\n"
-        f"Nagad (Personal): `{NAGAD_NUMBER}`\n\n"
+        f"bKash (Personal): `{bkash_num}`\n"
+        f"Nagad (Personal): `{nagad_num}`\n\n"
         f"Note: You must use 'Send Money' option.\n\n"
         f"After sending money, please reply with your Transaction ID (TrxID):"
     )
@@ -242,7 +255,6 @@ async def process_deposit_trxid(message: types.Message, state: FSMContext):
     except Exception as e:
         print(f"Failed to send deposit notification to admin: {e}")
 
-# Admin Deposit Approve / Reject Action
 @dp.callback_query(F.data.startswith("dep_approve_") | F.data.startswith("dep_reject_"))
 async def handle_deposit_action(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -355,7 +367,7 @@ async def back_to_menu(callback: types.CallbackQuery):
     await callback.message.answer("Main Menu:", parse_mode="Markdown", reply_markup=get_main_keyboard(callback.from_user.id))
     await callback.answer()
 
-# --- ADMIN PANEL & USER INFO / MANAGEMENT ---
+# --- ADMIN PANEL & PAYMENT SETTINGS ---
 @dp.message(F.text == "Admin Panel")
 async def admin_panel_button(message: types.Message):
     if message.from_user.id != ADMIN_ID:
@@ -365,11 +377,79 @@ async def admin_panel_button(message: types.Message):
         inline_keyboard=[
             [InlineKeyboardButton(text="User Info", callback_data="admin_user_info")],
             [InlineKeyboardButton(text="Number Management", callback_data="admin_stock")],
-            [InlineKeyboardButton(text="Manage Channels", callback_data="admin_channels"), InlineKeyboardButton(text="Payment System", callback_data="admin_pay")],
-            [InlineKeyboardButton(text="Bot Status", callback_data="admin_status")]
+            [InlineKeyboardButton(text="Payment Numbers Setup", callback_data="admin_pay_settings")],
+            [InlineKeyboardButton(text="Manage Channels", callback_data="admin_channels"), InlineKeyboardButton(text="Bot Status", callback_data="admin_status")]
         ]
     )
     await message.answer("ADMIN PANEL\n-----------------------------------------", parse_mode="Markdown", reply_markup=admin_markup)
+
+# --- Payment Numbers Admin Settings ---
+@dp.callback_query(F.data == "admin_pay_settings")
+async def admin_payment_settings(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        return await callback.answer("Unauthorized!", show_alert=True)
+    
+    bkash_num, nagad_num = await get_payment_numbers()
+    
+    text = (
+        f"Payment Numbers Setup\n\n"
+        f"Current bKash Number: `{bkash_num}`\n"
+        f"Current Nagad Number: `{nagad_num}`\n\n"
+        f"Click below to change numbers:"
+    )
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Change bKash Number", callback_data="set_bkash")],
+        [InlineKeyboardButton(text="Change Nagad Number", callback_data="set_nagad")],
+        [InlineKeyboardButton(text="Back", callback_data="admin_back")]
+    ])
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=markup)
+    await callback.answer()
+
+@dp.callback_query(F.data == "set_bkash")
+async def prompt_set_bkash(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(PaymentSettingsState.waiting_for_bkash)
+    await callback.message.answer("Please send the new bKash personal number:", parse_mode="Markdown")
+    await callback.answer()
+
+@dp.message(PaymentSettingsState.waiting_for_bkash)
+async def save_bkash_number(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    new_bkash = message.text.strip()
+    _, nagad_num = await get_payment_numbers()
+    
+    await settings_collection.update_one(
+        {"type": "payment_numbers"},
+        {"$set": {"bkash": new_bkash, "nagad": nagad_num}},
+        upsert=True
+    )
+    await state.clear()
+    await message.reply(f"Successfully updated bKash number to: `{new_bkash}`", parse_mode="Markdown")
+
+@dp.callback_query(F.data == "set_nagad")
+async def prompt_set_nagad(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(PaymentSettingsState.waiting_for_nagad)
+    await callback.message.answer("Please send the new Nagad personal number:", parse_mode="Markdown")
+    await callback.answer()
+
+@dp.message(PaymentSettingsState.waiting_for_nagad)
+async def save_nagad_number(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    new_nagad = message.text.strip()
+    bkash_num, _ = await get_payment_numbers()
+    
+    await settings_collection.update_one(
+        {"type": "payment_numbers"},
+        {"$set": {"bkash": bkash_num, "nagad": new_nagad}},
+        upsert=True
+    )
+    await state.clear()
+    await message.reply(f"Successfully updated Nagad number to: `{new_nagad}`", parse_mode="Markdown")
 
 # --- User Info Flow ---
 @dp.callback_query(F.data == "admin_user_info")
@@ -483,6 +563,7 @@ async def process_balance_action(message: types.Message, state: FSMContext):
     action_text = "added to" if action_type == "baladd" else "removed from"
     await message.reply(f"Successfully {action_text} user `{target_uid}`. New balance: ৳{new_bal}", parse_mode="Markdown")
 
+# --- Number Management ---
 @dp.callback_query(F.data == "admin_stock")
 async def admin_number_management(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -615,14 +696,14 @@ async def admin_back(callback: types.CallbackQuery):
     admin_markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="User Info", callback_data="admin_user_info")],
         [InlineKeyboardButton(text="Number Management", callback_data="admin_stock")],
-        [InlineKeyboardButton(text="Manage Channels", callback_data="admin_channels"), InlineKeyboardButton(text="Payment System", callback_data="admin_pay")],
-        [InlineKeyboardButton(text="Bot Status", callback_data="admin_status")]
+        [InlineKeyboardButton(text="Payment Numbers Setup", callback_data="admin_pay_settings")],
+        [InlineKeyboardButton(text="Manage Channels", callback_data="admin_channels"), InlineKeyboardButton(text="Bot Status", callback_data="admin_status")]
     ])
     await callback.message.edit_text("ADMIN PANEL\n-----------------------------------------", parse_mode="Markdown", reply_markup=admin_markup)
     await callback.answer()
 
 async def main():
-    print("Bot is running with Manual Deposit System...")
+    print("Bot is running with Dynamic Payment Settings...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
