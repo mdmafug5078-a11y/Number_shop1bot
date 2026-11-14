@@ -1,5 +1,6 @@
 import os
 import asyncio
+import pandas as pd
 from flask import Flask
 import threading
 from aiogram import Bot, Dispatcher, F, types
@@ -230,13 +231,13 @@ async def admin_number_management(callback: types.CallbackQuery):
     await callback.message.edit_text("Number Management\nSelect a country to manage or add new stock:", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(inline_keyboard=inline_buttons))
     await callback.answer()
 
-# --- Interactive Add Stock Flow ---
+# --- Interactive Add Stock Flow (.xlsx & .txt Supported) ---
 @dp.callback_query(F.data == "add_stock_start")
 async def start_add_stock(callback: types.CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
         return
     await state.set_state(AddStockState.waiting_for_country)
-    await callback.message.answer("Please enter the Country Name (e.g., TikTok / Bangladesh / Italy):", parse_mode="Markdown")
+    await callback.message.answer("Please enter the Country Name (e.g., Bangladesh / Italy):", parse_mode="Markdown")
     await callback.answer()
 
 @dp.message(AddStockState.waiting_for_country)
@@ -245,31 +246,56 @@ async def process_country_name(message: types.Message, state: FSMContext):
         return
     await state.update_data(country=message.text.strip())
     await state.set_state(AddStockState.waiting_for_file)
-    await message.answer("Now send the text file (.txt) or text containing numbers, OTP, and passwords.\nFormat per line: `Number Tab OTP Tab Password`.", parse_mode="Markdown")
+    await message.answer("Now send the Excel file (.xlsx) or text file (.txt) containing numbers, OTP, and passwords.", parse_mode="Markdown")
 
 @dp.message(AddStockState.waiting_for_file)
 async def process_stock_file(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
     
-    text_content = ""
-    if message.document:
-        file = await bot.get_file(message.document.file_id)
-        file_path = file.file_path
-        downloaded_file = await bot.download_file(file_path)
-        text_content = downloaded_file.decode("utf-8")
-    elif message.text:
-        text_content = message.text
-
-    lines = text_content.strip().split("\n")
     parsed_items = []
-    for line in lines:
-        parts = line.replace(",", "\t").split()
-        if len(parts) >= 3:
-            parsed_items.append({"number": parts[0], "otp": parts[1], "password": parts[2]})
+    try:
+        if message.document:
+            file = await bot.get_file(message.document.file_id)
+            file_path = file.file_path
+            downloaded_file = await bot.download_file(file_path)
+            
+            # Check if file is .xlsx or .xls
+            if message.document.file_name.endswith(('.xlsx', '.xls')):
+                temp_filename = f"temp_{message.from_user.id}.xlsx"
+                with open(temp_filename, "wb") as f:
+                    f.write(downloaded_file)
+                
+                df = pd.read_excel(temp_filename, header=None)
+                if os.path.exists(temp_filename):
+                    os.remove(temp_filename)
+                
+                for _, row in df.iterrows():
+                    if len(row) >= 3 and pd.notna(row[0]) and pd.notna(row[1]) and pd.notna(row[2]):
+                        parsed_items.append({
+                            "number": str(row[0]).strip(),
+                            "otp": str(row[1]).strip(),
+                            "password": str(row[2]).strip()
+                        })
+            else:
+                # Text file handling
+                text_content = downloaded_file.decode("utf-8")
+                lines = text_content.strip().split("\n")
+                for line in lines:
+                    parts = line.replace(",", "\t").split()
+                    if len(parts) >= 3:
+                        parsed_items.append({"number": parts[0], "otp": parts[1], "password": parts[2]})
+        elif message.text:
+            lines = message.text.strip().split("\n")
+            for line in lines:
+                parts = line.replace(",", "\t").split()
+                if len(parts) >= 3:
+                    parsed_items.append({"number": parts[0], "otp": parts[1], "password": parts[2]})
+    except Exception as e:
+        return await message.reply(f"Error reading file: {e}")
 
     if not parsed_items:
-        return await message.reply("Invalid format! Please send valid data.")
+        return await message.reply("Invalid format or empty file! Please send a valid Excel or text file.")
 
     await state.update_data(items=parsed_items)
     await state.set_state(AddStockState.waiting_for_price)
