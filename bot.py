@@ -5,6 +5,9 @@ import threading
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- Flask Server for 24/7 Uptime ---
@@ -28,21 +31,25 @@ MONGO_URI = "mongodb+srv://mdmafug5078_db_user:3Zw3FhgLlmUhF2sF@cluster0.gzd3tr1
 ADMIN_ID = 7310456453  # Your Fixed Admin ID
 
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(storage=MemoryStorage())
 
 client = AsyncIOMotorClient(MONGO_URI)
 db = client["otp_shop_bot"]
 users_collection = db["users"]
 accounts_collection = db["accounts"]
-channels_collection = db["channels"]  # ফোর্স সাবস্ক্রিপশন চ্যানেলের জন্য ডাটাবেস কালেকশন
+channels_collection = db["channels"]
 
-# --- Main Menu Keyboard ---
+# --- FSM States for Adding Channels Interactively ---
+class AddChannelState(StatesGroup):
+    waiting_for_name = State()
+    waiting_for_link = State()
+
+# --- Main Menu Keyboard (Without Change Language) ---
 def get_main_keyboard(user_id):
     buttons = [
         [KeyboardButton(text="👤 Profile"), KeyboardButton(text="🛒 Buy Number")],
         [KeyboardButton(text="💰 Add Balance"), KeyboardButton(text="🛠️ Support")],
-        [KeyboardButton(text="👥 My Referral"), KeyboardButton(text="📘 How to Work")],
-        [KeyboardButton(text="🌐 Change Language")]
+        [KeyboardButton(text="👥 My Referral"), KeyboardButton(text="📘 How to Work")]
     ]
     
     if user_id == ADMIN_ID:
@@ -50,7 +57,7 @@ def get_main_keyboard(user_id):
         
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
-# --- Check User Subscription for All Admin Channels ---
+# --- Check User Subscriptions ---
 async def check_user_subscriptions(user_id: int):
     if user_id == ADMIN_ID:
         return True, []
@@ -59,35 +66,34 @@ async def check_user_subscriptions(user_id: int):
     channels = await cursor.to_list(length=None)
     
     if not channels:
-        return True, []  # যদি কোনো চ্যানেল সেট করা না থাকে, তবে সবাই ঢুকতে পারবে
+        return True, []
         
     not_joined = []
     for ch in channels:
-        chat_id = ch["chat_id"]  # যেমন: @QuickTaskPay অথবা চ্যানেল আইডি
+        chat_id = ch["chat_id"]
         try:
             member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
             if member.status not in ["member", "creator", "administrator"]:
                 not_joined.append(ch)
         except Exception:
-            # যদি বট চ্যানেলে এডমিন না থাকে বা অন্য কোনো এরর হয়
             not_joined.append(ch)
             
     if not_joined:
         return False, not_joined
     return True, []
 
-# --- Start Command & Force Subscription Handler ---
+# --- Start Command & Force Subscription ---
 @dp.message(Command("start"))
-async def cmd_start(message: types.Message):
+async def cmd_start(message: types.Message, state: FSMContext):
+    await state.clear()
     user_id = message.from_user.id
     
-    # সাবস্ক্রিপশন চেক করা
     is_subbed, unjoined_channels = await check_user_subscriptions(user_id)
     
     if not is_subbed:
         inline_buttons = []
         for ch in unjoined_channels:
-            inline_buttons.append([InlineKeyboardButton(text=f"📢 Join {ch['name']}", url=ch['invite_link'])])
+            inline_buttons.append([InlineKeyboardButton(text=f"📢 {ch['name']}", url=ch['invite_link'])])
         
         inline_buttons.append([InlineKeyboardButton(text="✅ Joined, Check Again", callback_data="check_subscription")])
         
@@ -100,7 +106,6 @@ async def cmd_start(message: types.Message):
         await message.answer(text, parse_mode="Markdown", reply_markup=keyboard)
         return
 
-    # ইউজার ডাটাবেসে না থাকলে রেজিস্টার করা
     user = await users_collection.find_one({"userId": user_id})
     if not user:
         user = {"userId": user_id, "balance": 0.0}
@@ -116,7 +121,6 @@ async def cmd_start(message: types.Message):
     
     await message.answer(caption, parse_mode="Markdown", reply_markup=get_main_keyboard(user_id))
 
-# --- Check Join Callback ---
 @dp.callback_query(F.data == "check_subscription")
 async def process_check_subscription(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -172,7 +176,7 @@ async def support_handler(message: types.Message):
     )
     await message.answer(text, parse_mode="Markdown", reply_markup=get_main_keyboard(message.from_user.id))
 
-@dp.message(F.text.in_(["👥 My Referral", "📘 How to Work", "🌐 Change Language"]))
+@dp.message(F.text.in_(["👥 My Referral", "📘 How to Work"]))
 async def general_features(message: types.Message):
     await message.answer(f"✨ **{message.text}** feature is coming soon!", parse_mode="Markdown", reply_markup=get_main_keyboard(message.from_user.id))
 
@@ -255,7 +259,7 @@ async def admin_panel_button(message: types.Message):
     
     admin_markup = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="📢 Channel Management", callback_data="admin_channels")],
+            [InlineKeyboardButton(text="📢 Manage Force Join Channels", callback_data="admin_channels")],
             [InlineKeyboardButton(text="📦 Number Management", callback_data="admin_stock"), InlineKeyboardButton(text="💳 Payment System", callback_data="admin_pay")],
             [InlineKeyboardButton(text="📊 Bot Status", callback_data="admin_status"), InlineKeyboardButton(text="🗑️ Clear History", callback_data="admin_clear")]
         ]
@@ -276,33 +280,98 @@ async def admin_channels_menu(callback: types.CallbackQuery):
     cursor = channels_collection.find({})
     channels = await cursor.to_list(length=None)
     
-    ch_list = "\n".join([f"• <b>{ch['name']}</b> ({ch['chat_id']})" for ch in channels]) if channels else "No channels added yet."
+    inline_buttons = []
+    for ch in channels:
+        # প্রতিটি চ্যানেলের নামের পাশে ডিলিট (❌) বাটন থাকবে
+        inline_buttons.append([
+            InlineKeyboardButton(text=f"📢 {ch['name']}", callback_data=f"noop"),
+            InlineKeyboardButton(text="❌", callback_data=f"del_ch_{ch['chat_id']}")
+        ])
+        
+    inline_buttons.append([InlineKeyboardButton(text="➕ Add New Channel", callback_data="add_new_channel")])
+    inline_buttons.append([InlineKeyboardButton(text="🔙 Back to Admin", callback_data="admin_back")])
     
-    text = (
-        f"📢 <b>Channel Force-Sub Management</b>\n\n"
-        f"<b>Current Channels:</b>\n{ch_list}\n\n"
-        f"<b>Commands to Add/Remove:</b>\n"
-        f"➕ Add Channel:\n<code>/addchannel [Name] | [ChatID/Username] | [InviteLink]</code>\n"
-        f"➖ Remove Channel:\n<code>/delchannel [ChatID/Username]</code>"
+    keyboard = InlineKeyboardMarkup(inline_keyboard=inline_buttons)
+    await callback.message.edit_text("📢 **Manage Force Join Channels**", parse_mode="Markdown", reply_markup=keyboard)
+    await callback.answer()
+
+@dp.callback_query(F.data == "add_new_channel")
+async def start_add_channel(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AddChannelState.waiting_for_name)
+    await callback.message.answer("Please enter the Button Name (e.g., অফিসিয়াল গ্রুপ):")
+    await callback.answer()
+
+@dp.message(AddChannelState.waiting_for_name)
+async def process_channel_name(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.update_data(channel_name=message.text)
+    await state.set_state(AddChannelState.waiting_for_link)
+    await message.answer("Please enter the Channel Link or @username (e.g. https://t.me/Channel or @Channel):")
+
+@dp.message(AddChannelState.waiting_for_link)
+async def process_channel_link(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    
+    data = await state.get_data()
+    name = data.get("channel_name")
+    link = message.text.strip()
+    
+    # চ্যাট আইডি বা ইউজারনেম বের করা
+    if link.startswith("@"):
+        chat_id = link
+    else:
+        chat_id = "@" + link.split("/")[-1] if "t.me/" in link else link
+
+    await channels_collection.update_one(
+        {"chat_id": chat_id},
+        {"$set": {"name": name, "chat_id": chat_id, "invite_link": link}},
+        upsert=True
     )
     
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Back to Admin", callback_data="admin_back")]
-    ])
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+    await state.clear()
+    await message.reply(f"✅ Successfully added channel:\n<b>{name}</b>", parse_mode="HTML")
+
+@dp.callback_query(F.data.startswith("del_ch_"))
+async def delete_channel_action(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    chat_id = callback.data.replace("del_ch_", "")
+    await channels_collection.delete_one({"chat_id": chat_id})
+    await callback.answer("✅ Channel removed successfully!", show_alert=True)
+    
+    # মেনু রিফ্রেশ করা
+    cursor = channels_collection.find({})
+    channels = await cursor.to_list(length=None)
+    
+    inline_buttons = []
+    for ch in channels:
+        inline_buttons.append([
+            InlineKeyboardButton(text=f"📢 {ch['name']}", callback_data=f"noop"),
+            InlineKeyboardButton(text="❌", callback_data=f"del_ch_{ch['chat_id']}")
+        ])
+    inline_buttons.append([InlineKeyboardButton(text="➕ Add New Channel", callback_data="add_new_channel")])
+    inline_buttons.append([InlineKeyboardButton(text="🔙 Back to Admin", callback_data="admin_back")])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=inline_buttons)
+    await callback.message.edit_reply_markup(reply_markup=keyboard)
+
+@dp.callback_query(F.data == "noop")
+async def noop_callback(callback: types.CallbackQuery):
     await callback.answer()
 
 @dp.callback_query(F.data == "admin_back")
 async def admin_back(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         return
-    admin_markup = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="📢 Channel Management", callback_data="admin_channels")],
-            [InlineKeyboardButton(text="📦 Number Management", callback_data="admin_stock"), InlineKeyboardButton(text="💳 Payment System", callback_data="admin_pay")],
-            [InlineKeyboardButton(text="📊 Bot Status", callback_data="admin_status"), InlineKeyboardButton(text="🗑️ Clear History", callback_data="admin_clear")]
-        ]
-    )
+    admin_markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📢 Manage Force Join Channels", callback_data="admin_channels")],
+        [InlineKeyboardButton(text="📦 Number Management", callback_data="admin_stock"), InlineKeyboardButton(text="💳 Payment System", callback_data="admin_pay")],
+        [InlineKeyboardButton(text="📊 Bot Status", callback_data="admin_status"), InlineKeyboardButton(text="🗑️ Clear History", callback_data="admin_clear")]
+    ])
     await callback.message.edit_text("👑 **ADMIN PANEL**\n═════════════════════\nSelect an option below:", parse_mode="Markdown", reply_markup=admin_markup)
     await callback.answer()
 
@@ -321,44 +390,6 @@ async def admin_inline_actions(callback: types.CallbackQuery):
     else:
         await callback.message.answer("⚙️ Feature active.", parse_mode="Markdown")
     await callback.answer()
-
-# --- Admin Commands for Channels ---
-@dp.message(Command("addchannel"))
-async def admin_add_channel(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    try:
-        data_text = message.text.replace("/addchannel", "").strip()
-        parts = [p.strip() for p in data_text.split("|")]
-        if len(parts) != 3:
-            return await message.reply("⚠️ Format: `/addchannel ChannelName | @UsernameOrID | https://t.me/...`", parse_mode="Markdown")
-            
-        name, chat_id, invite_link = parts
-        await channels_collection.update_one(
-            {"chat_id": chat_id},
-            {"$set": {"name": name, "chat_id": chat_id, "invite_link": invite_link}},
-            upsert=True
-        )
-        await message.reply(f"✅ Channel <b>{name}</b> added successfully!", parse_mode="HTML")
-    except Exception as e:
-        await message.reply(f"❌ Error: {e}")
-
-@dp.message(Command("delchannel"))
-async def admin_del_channel(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    try:
-        chat_id = message.text.replace("/delchannel", "").strip()
-        if not chat_id:
-            return await message.reply("⚠️ Provide chat ID/Username. Example: `/delchannel @QuickTaskPay`", parse_mode="Markdown")
-            
-        result = await channels_collection.delete_one({"chat_id": chat_id})
-        if result.deleted_count > 0:
-            await message.reply(f"✅ Channel `{chat_id}` removed successfully!", parse_mode="Markdown")
-        else:
-            await message.reply(f"❌ Channel `{chat_id}` not found in database.", parse_mode="Markdown")
-    except Exception as e:
-        await message.reply(f"❌ Error: {e}")
 
 # Direct Admin Commands for Stock & Balance
 @dp.message(Command("addfb"))
@@ -401,7 +432,7 @@ async def admin_add_balance(message: types.Message):
     await message.reply(f"✅ Successfully added ৳{amount} to User `{target_user}`.")
 
 async def main():
-    print("🚀 Secure Python Bot with Dynamic Channels is running...")
+    print("🚀 Secure Python Bot with Interactive Channel Management is running...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
