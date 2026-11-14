@@ -29,6 +29,7 @@ def keep_alive():
 BOT_TOKEN = "9046722307:AAEGYeQsoPeLiiwcR1Q1RvkRrdm70u8G3VE"
 MONGO_URI = "mongodb+srv://mdmafug5078_db_user:3Zw3FhgLlmUhF2sF@cluster0.gzd3tr1.mongodb.net/otp_shop_bot?retryWrites=true&w=majority"
 ADMIN_ID = 7310456453  # Your Fixed Admin ID
+NOTIFICATION_CHANNEL = "@QuickTaskPay"  # যে চ্যানেলে স্টক অ্যাড হলে নোটিফিকেশন যাবে
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -39,77 +40,62 @@ users_collection = db["users"]
 accounts_collection = db["accounts"]
 channels_collection = db["channels"]
 
-# --- FSM States for Adding Channels Interactively ---
-class AddChannelState(StatesGroup):
-    waiting_for_name = State()
-    waiting_for_link = State()
+# --- FSM States ---
+class AddStockState(StatesGroup):
+    waiting_for_country = State()
+    waiting_for_file = State()
+    waiting_for_price = State()
 
-# --- Main Menu Keyboard (Without Change Language) ---
+class UpdatePriceState(StatesGroup):
+    waiting_for_new_price = State()
+
+# --- Main Menu Keyboard ---
 def get_main_keyboard(user_id):
     buttons = [
         [KeyboardButton(text="👤 Profile"), KeyboardButton(text="🛒 Buy Number")],
         [KeyboardButton(text="💰 Add Balance"), KeyboardButton(text="🛠️ Support")],
         [KeyboardButton(text="👥 My Referral"), KeyboardButton(text="📘 How to Work")]
     ]
-    
     if user_id == ADMIN_ID:
         buttons.append([KeyboardButton(text="⚙️ Admin Panel")])
-        
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
-# --- Check User Subscriptions ---
+# --- Force Subscription Check ---
 async def check_user_subscriptions(user_id: int):
     if user_id == ADMIN_ID:
         return True, []
-    
     cursor = channels_collection.find({})
     channels = await cursor.to_list(length=None)
-    
     if not channels:
         return True, []
-        
     not_joined = []
     for ch in channels:
-        chat_id = ch["chat_id"]
         try:
-            member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+            member = await bot.get_chat_member(chat_id=ch["chat_id"], user_id=user_id)
             if member.status not in ["member", "creator", "administrator"]:
                 not_joined.append(ch)
         except Exception:
             not_joined.append(ch)
-            
     if not_joined:
         return False, not_joined
     return True, []
 
-# --- Start Command & Force Subscription ---
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
-    
-    is_subbed, unjoined_channels = await check_user_subscriptions(user_id)
+    is_subbed, unjoined = await check_user_subscriptions(user_id)
     
     if not is_subbed:
-        inline_buttons = []
-        for ch in unjoined_channels:
-            inline_buttons.append([InlineKeyboardButton(text=f"📢 {ch['name']}", url=ch['invite_link'])])
-        
+        inline_buttons = [[InlineKeyboardButton(text=f"📢 {ch['name']}", url=ch['invite_link'])] for ch in unjoined]
         inline_buttons.append([InlineKeyboardButton(text="✅ Joined, Check Again", callback_data="check_subscription")])
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=inline_buttons)
-        text = (
-            "⚠️ **Access Denied!**\n\n"
-            "You must join our official channels below to use this bot. "
-            "After joining all channels, click the check button."
-        )
-        await message.answer(text, parse_mode="Markdown", reply_markup=keyboard)
+        await message.answer("⚠️ You must join our official channels to use this bot.", reply_markup=InlineKeyboardMarkup(inline_keyboard=inline_buttons))
         return
 
     user = await users_collection.find_one({"userId": user_id})
     if not user:
-        user = {"userId": user_id, "balance": 0.0}
-        await users_collection.insert_one(user)
+        await users_collection.insert_one({"userId": user_id, "balance": 0.0})
+        user = {"balance": 0.0}
 
     caption = (
         f"🔥 **Welcome to Number Shop, EARN WITH MAFUG!** ✨\n\n"
@@ -118,26 +104,19 @@ async def cmd_start(message: types.Message, state: FSMContext):
         f"🎁 Instant automated accounts & OTP delivery.\n"
         f"🚀 Start shopping today!"
     )
-    
     await message.answer(caption, parse_mode="Markdown", reply_markup=get_main_keyboard(user_id))
 
 @dp.callback_query(F.data == "check_subscription")
-async def process_check_subscription(callback: types.CallbackQuery):
+async def process_check_sub(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     is_subbed, _ = await check_user_subscriptions(user_id)
-    
     if is_subbed:
         await callback.message.delete()
         user = await users_collection.find_one({"userId": user_id})
         if not user:
             await users_collection.insert_one({"userId": user_id, "balance": 0.0})
             user = {"balance": 0.0}
-            
-        caption = (
-            f"🎉 **Thank you for joining! Welcome back.** ✨\n\n"
-            f"💰 **Your Balance:** ৳{user.get('balance', 0.0)}\n"
-            f"🆔 **User ID:** `{user_id}`"
-        )
+        caption = f"🎉 **Welcome back!**\n💰 **Your Balance:** ৳{user.get('balance', 0.0)}"
         await callback.message.answer(caption, parse_mode="Markdown", reply_markup=get_main_keyboard(user_id))
     else:
         await callback.answer("❌ You haven't joined all required channels yet!", show_alert=True)
@@ -148,33 +127,16 @@ async def profile_handler(message: types.Message):
     user_id = message.from_user.id
     user = await users_collection.find_one({"userId": user_id})
     balance = user['balance'] if user else 0.0
-
-    text = (
-        f"👤 **Account Information:**\n\n"
-        f"🔸 **Name:** {message.from_user.full_name}\n"
-        f"🔸 **Username:** @{message.from_user.username or 'None'}\n"
-        f"🔸 **User ID:** `{user_id}`\n"
-        f"🔸 **Balance:** ৳{balance}"
-    )
+    text = f"👤 **Account Information:**\n\n🔸 **Name:** {message.from_user.full_name}\n🔸 **User ID:** `{user_id}`\n🔸 **Balance:** ৳{balance}"
     await message.answer(text, parse_mode="Markdown", reply_markup=get_main_keyboard(user_id))
 
 @dp.message(F.text == "💰 Add Balance")
 async def add_balance_info(message: types.Message):
-    text = (
-        f"💳 **How to Add Balance:**\n\n"
-        f"Contact the admin to top up your account balance.\n"
-        f"📞 **Admin Contact:** @mh_mafug"
-    )
-    await message.answer(text, parse_mode="Markdown", reply_markup=get_main_keyboard(message.from_user.id))
+    await message.answer("💳 **How to Add Balance:**\nContact the admin to top up your balance.\n📞 **Admin:** @mh_mafug", parse_mode="Markdown", reply_markup=get_main_keyboard(message.from_user.id))
 
 @dp.message(F.text == "🛠️ Support")
 async def support_handler(message: types.Message):
-    text = (
-        f"🛠️ **Customer Support:**\n\n"
-        f"Need help? Feel free to contact our official support team:\n"
-        f"👉 @QuickTaskPay"
-    )
-    await message.answer(text, parse_mode="Markdown", reply_markup=get_main_keyboard(message.from_user.id))
+    await message.answer("🛠️ **Customer Support:**\n👉 @QuickTaskPay", parse_mode="Markdown", reply_markup=get_main_keyboard(message.from_user.id))
 
 @dp.message(F.text.in_(["👥 My Referral", "📘 How to Work"]))
 async def general_features(message: types.Message):
@@ -183,49 +145,30 @@ async def general_features(message: types.Message):
 # --- Buy Number Menu ---
 @dp.message(F.text == "🛒 Buy Number")
 async def buy_menu(message: types.Message):
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="📘 Facebook Accounts / OTP", callback_data="buy_facebook")],
-            [InlineKeyboardButton(text="🔙 Main Menu", callback_data="back_to_menu")]
-        ]
-    )
-    await message.answer("🌐 **Select Platform:**", reply_markup=keyboard)
-
-@dp.callback_query(F.data == "buy_facebook")
-async def select_facebook_country(callback: types.CallbackQuery):
-    cursor = accounts_collection.find({"platform": "facebook", "isSold": False})
+    cursor = accounts_collection.find({"isSold": False})
     accounts = await cursor.to_list(length=None)
-
     if not accounts:
-        return await callback.answer("❌ Sorry, no stock available right now!", show_alert=True)
+        return await message.answer("❌ Sorry, no stock available right now!")
 
     countries = list(set(acc["country"] for acc in accounts))
     inline_buttons = []
-
     for country in countries:
-        stock_count = sum(1 for acc in accounts if acc["country"] == country)
-        sample_acc = next(acc for acc in accounts if acc["country"] == country)
-        
-        btn_text = f"🌍 {country} • ৳{sample_acc['price']} • Stock: ({stock_count})"
-        inline_buttons.append([InlineKeyboardButton(text=btn_text, callback_data=f"country_{country}")])
+        count = sum(1 for acc in accounts if acc["country"] == country)
+        sample = next(acc for acc in accounts if acc["country"] == country)
+        inline_buttons.append([InlineKeyboardButton(text=f"🌍 {country} • ৳{sample['price']} • Stock: ({count})", callback_data=f"buy_country_{country}")])
+    
+    inline_buttons.append([InlineKeyboardButton(text="🔙 Main Menu", callback_data="back_to_menu")])
+    await message.answer("🌐 **Select Country to Buy:**", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(inline_keyboard=inline_buttons))
 
-    inline_buttons.append([InlineKeyboardButton(text="🔙 Back", callback_data="back_to_menu")])
-
-    keyboard = InlineKeyboardMarkup(inline_keyboard=inline_buttons)
-    await callback.message.edit_text("🌍 **Select Country:**", reply_markup=keyboard)
-    await callback.answer()
-
-@dp.callback_query(F.data.startswith("country_"))
+@dp.callback_query(F.data.startswith("buy_country_"))
 async def process_purchase(callback: types.CallbackQuery):
-    country = callback.data.split("_")[1]
+    country = callback.data.replace("buy_country_", "")
     user_id = callback.from_user.id
-
     user = await users_collection.find_one({"userId": user_id})
-    account = await accounts_collection.find_one({"platform": "facebook", "country": country, "isSold": False})
+    account = await accounts_collection.find_one({"country": country, "isSold": False})
 
     if not account:
         return await callback.answer("❌ Stock out for this country!", show_alert=True)
-
     if user["balance"] < account["price"]:
         return await callback.answer(f"❌ Insufficient balance! Required: ৳{account['price']}", show_alert=True)
 
@@ -233,7 +176,7 @@ async def process_purchase(callback: types.CallbackQuery):
     await accounts_collection.update_one({"_id": account["_id"]}, {"$set": {"isSold": True}})
 
     success_text = (
-        f"🎉 **Purchase Successful!**\n\n"
+        f"✅ **Purchase Successful!**\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"📱 **Number:** `{account['number']}`\n"
         f"🔑 **OTP / Code:** `{account['otp']}`\n"
@@ -241,17 +184,16 @@ async def process_purchase(callback: types.CallbackQuery):
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"⚠️ Please use the account within 24 hours."
     )
-
     await callback.message.edit_text(success_text, parse_mode="Markdown")
     await callback.answer()
 
 @dp.callback_query(F.data == "back_to_menu")
 async def back_to_menu(callback: types.CallbackQuery):
     await callback.message.delete()
-    await callback.message.answer("🏠 **Main Menu:**", reply_markup=get_main_keyboard(callback.from_user.id))
+    await callback.message.answer("🏠 **Main Menu:**", parse_mode="Markdown", reply_markup=get_main_keyboard(callback.from_user.id))
     await callback.answer()
 
-# --- HIGH-SECURITY ADMIN PANEL ---
+# --- ADMIN PANEL & NUMBER MANAGEMENT ---
 @dp.message(F.text == "⚙️ Admin Panel")
 async def admin_panel_button(message: types.Message):
     if message.from_user.id != ADMIN_ID:
@@ -259,108 +201,198 @@ async def admin_panel_button(message: types.Message):
     
     admin_markup = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="📢 Manage Force Join Channels", callback_data="admin_channels")],
-            [InlineKeyboardButton(text="📦 Number Management", callback_data="admin_stock"), InlineKeyboardButton(text="💳 Payment System", callback_data="admin_pay")],
-            [InlineKeyboardButton(text="📊 Bot Status", callback_data="admin_status"), InlineKeyboardButton(text="🗑️ Clear History", callback_data="admin_clear")]
+            [InlineKeyboardButton(text="📦 Number Management", callback_data="admin_stock")],
+            [InlineKeyboardButton(text="📢 Manage Channels", callback_data="admin_channels"), InlineKeyboardButton(text="💳 Payment System", callback_data="admin_pay")],
+            [InlineKeyboardButton(text="📊 Bot Status", callback_data="admin_status")]
         ]
     )
-    
-    admin_text = (
-        f"👑 **ADMIN PANEL**\n"
-        f"═════════════════════\n"
-        f"Select an option below:"
-    )
-    await message.answer(admin_text, parse_mode="Markdown", reply_markup=admin_markup)
+    await message.answer("👑 **ADMIN PANEL**\n═════════════════════", parse_mode="Markdown", reply_markup=admin_markup)
 
-@dp.callback_query(F.data == "admin_channels")
-async def admin_channels_menu(callback: types.CallbackQuery):
+@dp.callback_query(F.data == "admin_stock")
+async def admin_number_management(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         return await callback.answer("⛔ Unauthorized!", show_alert=True)
-        
-    cursor = channels_collection.find({})
-    channels = await cursor.to_list(length=None)
     
+    cursor = accounts_collection.find({})
+    accounts = await cursor.to_list(length=None)
+    
+    countries = list(set(acc["country"] for acc in accounts))
     inline_buttons = []
-    for ch in channels:
-        # প্রতিটি চ্যানেলের নামের পাশে ডিলিট (❌) বাটন থাকবে
-        inline_buttons.append([
-            InlineKeyboardButton(text=f"📢 {ch['name']}", callback_data=f"noop"),
-            InlineKeyboardButton(text="❌", callback_data=f"del_ch_{ch['chat_id']}")
-        ])
+    
+    for country in countries:
+        total = sum(1 for acc in accounts if acc["country"] == country)
+        sold = sum(1 for acc in accounts if acc["country"] == country and acc["isSold"] == True)
+        inline_buttons.append([InlineKeyboardButton(text=f"🌍 {country} [Total: {total}, Sold: {sold}]", callback_data=f"manage_country_{country}")])
         
-    inline_buttons.append([InlineKeyboardButton(text="➕ Add New Channel", callback_data="add_new_channel")])
+    inline_buttons.append([InlineKeyboardButton(text="➕ Add New Country Stock", callback_data="add_stock_start")])
     inline_buttons.append([InlineKeyboardButton(text="🔙 Back to Admin", callback_data="admin_back")])
     
-    keyboard = InlineKeyboardMarkup(inline_keyboard=inline_buttons)
-    await callback.message.edit_text("📢 **Manage Force Join Channels**", parse_mode="Markdown", reply_markup=keyboard)
+    await callback.message.edit_text("📦 **Number Management**\nSelect a country to manage or add new stock:", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(inline_keyboard=inline_buttons))
     await callback.answer()
 
-@dp.callback_query(F.data == "add_new_channel")
-async def start_add_channel(callback: types.CallbackQuery, state: FSMContext):
+# --- Interactive Add Stock Flow ---
+@dp.callback_query(F.data == "add_stock_start")
+async def start_add_stock(callback: types.CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
         return
-    await state.set_state(AddChannelState.waiting_for_name)
-    await callback.message.answer("Please enter the Button Name (e.g., অফিসিয়াল গ্রুপ):")
+    await state.set_state(AddStockState.waiting_for_country)
+    await callback.message.answer("📝 Please enter the **Country Name** (e.g., TikTok / Bangladesh / Italy):", parse_mode="Markdown")
     await callback.answer()
 
-@dp.message(AddChannelState.waiting_for_name)
-async def process_channel_name(message: types.Message, state: FSMContext):
+@dp.message(AddStockState.waiting_for_country)
+async def process_country_name(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
-    await state.update_data(channel_name=message.text)
-    await state.set_state(AddChannelState.waiting_for_link)
-    await message.answer("Please enter the Channel Link or @username (e.g. https://t.me/Channel or @Channel):")
+    await state.update_data(country=message.text.strip())
+    await state.set_state(AddStockState.waiting_for_file)
+    await message.answer("📁 Now send the text file (.txt) or text containing numbers, OTP, and passwords.\nFormat per line: `Number Tab OTP Tab Password` (as shown in your screenshot).", parse_mode="Markdown")
 
-@dp.message(AddChannelState.waiting_for_link)
-async def process_channel_link(message: types.Message, state: FSMContext):
+@dp.message(AddStockState.waiting_for_file)
+async def process_stock_file(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
     
+    text_content = ""
+    if message.document:
+        file = await bot.get_file(message.document.file_id)
+        file_path = file.file_path
+        downloaded_file = await bot.download_file(file_path)
+        text_content = downloaded_file.decode("utf-8")
+    elif message.text:
+        text_content = message.text
+
+    lines = text_content.strip().split("\n")
+    parsed_items = []
+    for line in lines:
+        parts = line.replace(",", "\t").split()
+        if len(parts) >= 3:
+            parsed_items.append({"number": parts[0], "otp": parts[1], "password": parts[2]})
+
+    if not parsed_items:
+        return await message.reply("❌ Invalid format! Please send valid data.")
+
+    await state.update_data(items=parsed_items)
+    await state.set_state(AddStockState.waiting_for_price)
+    await message.reply(f"✅ Successfully read `{len(parsed_items)}` numbers.\n💰 Now enter the **Price per Number** in BDT (e.g., 0.80 or 1.00):", parse_mode="Markdown")
+
+@dp.message(AddStockState.waiting_for_price)
+async def process_stock_price(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    try:
+        price = float(message.text.strip())
+    except ValueError:
+        return await message.reply("❌ Invalid price! Please enter a number.")
+
     data = await state.get_data()
-    name = data.get("channel_name")
-    link = message.text.strip()
-    
-    # চ্যাট আইডি বা ইউজারনেম বের করা
-    if link.startswith("@"):
-        chat_id = link
-    else:
-        chat_id = "@" + link.split("/")[-1] if "t.me/" in link else link
+    country = data.get("country")
+    items = data.get("items")
 
-    await channels_collection.update_one(
-        {"chat_id": chat_id},
-        {"$set": {"name": name, "chat_id": chat_id, "invite_link": link}},
-        upsert=True
-    )
-    
+    db_docs = []
+    for item in items:
+        db_docs.append({
+            "platform": "facebook",
+            "country": country,
+            "price": price,
+            "number": item["number"],
+            "otp": item["otp"],
+            "password": item["password"],
+            "isSold": False
+        })
+
+    await accounts_collection.insert_many(db_docs)
     await state.clear()
-    await message.reply(f"✅ Successfully added channel:\n<b>{name}</b>", parse_mode="HTML")
 
-@dp.callback_query(F.data.startswith("del_ch_"))
-async def delete_channel_action(callback: types.CallbackQuery):
+    await message.reply(f"✅ Added `{len(db_docs)}` numbers for **{country}`} at **৳{price}** each!", parse_mode="Markdown")
+
+    # Send Notification to Channel with 'Buy Number' Button
+    try:
+        notification_text = (
+            f"🇳🇬 | <b>{country}</b>\n"
+            f"TOTALL : {len(db_docs)} Numbers\n"
+            f"OTP Rate: {price:.2f} BDT"
+        )
+        channel_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🚀 Buy Number", url=f"https://t.me/{(await bot.get_me()).username}")]
+        ])
+        await bot.send_message(NOTIFICATION_CHANNEL, notification_text, parse_mode="HTML", reply_markup=channel_keyboard)
+    except Exception as e:
+        print(f"Notification error: {e}")
+
+# --- Country Management (Stock Add, Price Change, Delete) ---
+@dp.callback_query(F.data.startswith("manage_country_"))
+async def manage_single_country(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        return await callback.answer("⛔ Unauthorized!", show_alert=True)
+    
+    country = callback.data.replace("manage_country_", "")
+    total = await accounts_collection.count_documents({"country": country})
+    sold = await accounts_collection.count_documents({"country": country, "isSold": True})
+    available = await accounts_collection.count_documents({"country": country, "isSold": False})
+    
+    sample = await accounts_collection.find_one({"country": country})
+    price = sample["price"] if sample else 0.0
+
+    text = (
+        f"🌍 **Country:** {country}\n"
+        f"💰 **Current Price:** ৳{price}\n"
+        f"📦 **Total Stock:** {total}\n"
+        f"🛒 **Available:** {available}\n"
+        f"✅ **Sold:** {sold}"
+    )
+
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Stock Add", callback_data=f"m_add_{country}"), InlineKeyboardButton(text="💲 Price Change", callback_data=f"m_price_{country}")],
+        [InlineKeyboardButton(text="🗑️ Delete Number", callback_data=f"m_del_{country}")],
+        [InlineKeyboardButton(text="🔙 Back to List", callback_data="admin_stock")]
+    ])
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=markup)
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("m_price_"))
+async def prompt_change_price(callback: types.CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
         return
-    chat_id = callback.data.replace("del_ch_", "")
-    await channels_collection.delete_one({"chat_id": chat_id})
-    await callback.answer("✅ Channel removed successfully!", show_alert=True)
-    
-    # মেনু রিফ্রেশ করা
-    cursor = channels_collection.find({})
-    channels = await cursor.to_list(length=None)
-    
-    inline_buttons = []
-    for ch in channels:
-        inline_buttons.append([
-            InlineKeyboardButton(text=f"📢 {ch['name']}", callback_data=f"noop"),
-            InlineKeyboardButton(text="❌", callback_data=f"del_ch_{ch['chat_id']}")
-        ])
-    inline_buttons.append([InlineKeyboardButton(text="➕ Add New Channel", callback_data="add_new_channel")])
-    inline_buttons.append([InlineKeyboardButton(text="🔙 Back to Admin", callback_data="admin_back")])
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=inline_buttons)
-    await callback.message.edit_reply_markup(reply_markup=keyboard)
+    country = callback.data.replace("m_price_", "")
+    await state.update_data(target_country=country)
+    await state.set_state(UpdatePriceState.waiting_for_new_price)
+    await callback.message.answer(f"Enter new price for **{country}**:", parse_mode="Markdown")
+    await callback.answer()
 
-@dp.callback_query(F.data == "noop")
-async def noop_callback(callback: types.CallbackQuery):
+@dp.message(UpdatePriceState.waiting_for_new_price)
+async def apply_new_price(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    try:
+        new_price = float(message.text.strip())
+    except ValueError:
+        return await message.reply("❌ Invalid price!")
+
+    data = await state.get_data()
+    country = data.get("target_country")
+    await accounts_collection.update_many({"country": country}, {"$set": {"price": new_price}})
+    await state.clear()
+    await message.reply(f"✅ Price updated to ৳{new_price} for all **{country}** accounts!", parse_mode="Markdown")
+
+@dp.callback_query(F.data.startswith("m_del_"))
+async def confirm_delete_country(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    country = callback.data.replace("m_del_", "")
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⚠️ Yes, Delete All", callback_data=f"confirm_del_{country}")],
+        [InlineKeyboardButton(text="❌ Cancel", callback_data=f"manage_country_{country}")]
+    ])
+    await callback.message.edit_text(f"⚠️ Are you sure you want to delete all unsold stock for **{country}**?", parse_mode="Markdown", reply_markup=markup)
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("confirm_del_"))
+async def execute_delete_country(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    country = callback.data.replace("confirm_del_", "")
+    await accounts_collection.delete_many({"country": country, "isSold": False})
+    await callback.message.edit_text(f"✅ Unsold stock for **{country}** has been removed successfully!", parse_mode="Markdown")
     await callback.answer()
 
 @dp.callback_query(F.data == "admin_back")
@@ -368,71 +400,15 @@ async def admin_back(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         return
     admin_markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📢 Manage Force Join Channels", callback_data="admin_channels")],
-        [InlineKeyboardButton(text="📦 Number Management", callback_data="admin_stock"), InlineKeyboardButton(text="💳 Payment System", callback_data="admin_pay")],
-        [InlineKeyboardButton(text="📊 Bot Status", callback_data="admin_status"), InlineKeyboardButton(text="🗑️ Clear History", callback_data="admin_clear")]
+        [InlineKeyboardButton(text="📦 Number Management", callback_data="admin_stock")],
+        [InlineKeyboardButton(text="📢 Manage Channels", callback_data="admin_channels"), InlineKeyboardButton(text="💳 Payment System", callback_data="admin_pay")],
+        [InlineKeyboardButton(text="📊 Bot Status", callback_data="admin_status")]
     ])
-    await callback.message.edit_text("👑 **ADMIN PANEL**\n═════════════════════\nSelect an option below:", parse_mode="Markdown", reply_markup=admin_markup)
+    await callback.message.edit_text("👑 **ADMIN PANEL**\n═════════════════════", parse_mode="Markdown", reply_markup=admin_markup)
     await callback.answer()
-
-@dp.callback_query(F.data.startswith("admin_"))
-async def admin_inline_actions(callback: types.CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        return await callback.answer("⛔ Unauthorized!", show_alert=True)
-    
-    action = callback.data.split("_")[1]
-    if action == "status":
-        await callback.message.answer("📊 **Bot Status:**\n\nServer is running smoothly 24/7.", parse_mode="Markdown")
-    elif action == "stock":
-        await callback.message.answer("📦 **To add stock, send:**\n`/addfb [Country] [Price] [Number] [OTP] [Password]`", parse_mode="Markdown")
-    elif action == "pay":
-        await callback.message.answer("💳 **To add balance, send:**\n`/addbal [UserId] [Amount]`", parse_mode="Markdown")
-    else:
-        await callback.message.answer("⚙️ Feature active.", parse_mode="Markdown")
-    await callback.answer()
-
-# Direct Admin Commands for Stock & Balance
-@dp.message(Command("addfb"))
-async def admin_add_stock(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        return await message.reply("⛔ Unauthorized access.")
-    
-    args = message.text.split()[1:]
-    if len(args) < 5:
-        return await message.reply("⚠️ Correct Format: /addfb [Country] [Price] [Number] [OTP] [Password]")
-
-    country, price, number, otp, password = args
-    await accounts_collection.insert_one({
-        "platform": "facebook",
-        "country": country,
-        "price": float(price),
-        "number": number,
-        "otp": otp,
-        "password": password,
-        "isSold": False
-    })
-    await message.reply(f"✅ Stock added successfully!\nCountry: {country}\nNumber: {number}")
-
-@dp.message(Command("addbal"))
-async def admin_add_balance(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        return await message.reply("⛔ Unauthorized access.")
-    
-    args = message.text.split()[1:]
-    if len(args) < 2:
-        return await message.reply("⚠️ Correct Format: /addbal [UserId] [Amount]")
-
-    target_user = int(args[0])
-    amount = float(args[1])
-    await users_collection.update_one(
-        {"userId": target_user},
-        {"$inc": {"balance": amount}},
-        upsert=True
-    )
-    await message.reply(f"✅ Successfully added ৳{amount} to User `{target_user}`.")
 
 async def main():
-    print("🚀 Secure Python Bot with Interactive Channel Management is running...")
+    print("🚀 Bot is running with Advanced Number Management...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
