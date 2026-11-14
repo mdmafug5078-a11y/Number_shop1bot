@@ -9,7 +9,6 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- কনফিগারেশন ---
 BOT_TOKEN = "9046722307:AAEGYeQsoPeLiiwcR1Q1RvkRrdm70u8G3VE"      
-CHANNEL_ID = "@QuickTaskPay"    # আপনার চ্যানেল ইউজারনেম
 ADMIN_ID = 7310456453                  # আপনার টেলিগ্রাম আইডি
 
 # MongoDB ক্লাউড ডাটাবেস কানেকশন (আপনার পাসওয়ার্ডটি বসিয়ে নিন)
@@ -24,38 +23,12 @@ stocks_col = db["stocks"]
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
-# --- ১. চ্যানেল মেম্বারশিপ চেক ---
-async def check_subscription(user_id: int) -> bool:
-    if user_id == ADMIN_ID:  # এডমিনের জন্য চ্যানেল চেক সবসময় বাইপাস থাকবে
-        return True
-    try:
-        member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
-        if member.status in ["member", "creator", "administrator"]:
-            return True
-    except Exception as e:
-        logging.error(f"Subscription check error: {e}")
-    return False
-
-# --- ২. /start কমান্ড ---
+# --- /start কমান্ড (সরাসরি মেইন মেনু) ---
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
-    is_subscribed = await check_subscription(user_id)
     
-    if not is_subscribed:
-        channel_link = f"https://t.me/{CHANNEL_ID.replace('@', '')}"
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📢 আমাদের চ্যানেলে জয়েন করুন", url=channel_link)],
-            [InlineKeyboardButton(text="✅ জয়েন করেছি, চেক করুন", callback_data="check_join")]
-        ])
-        await message.answer(
-            "⚠️ <b>বটটি ব্যবহার করতে হলে অবশ্যই আমাদের অফিশিয়াল চ্যানেলে জয়েন করতে হবে!</b>\n\n"
-            "প্রথমে চ্যানেলে জয়েন করুন, তারপর নিচের বাটনে চাপ দিন।",
-            reply_markup=keyboard
-        )
-        return
-
-    # ইউজার ডাটাবেসে না থাকলে অ্যাড করা
+    # ইউজার ডাটাবেসে না থাকলে অ্যাড করা (ফ্রি ১০ টাকা ব্যালেন্স টেস্টের জন্য)
     user = await users_col.find_one({"user_id": user_id})
     if not user:
         await users_col.insert_one({"user_id": user_id, "balance": 10.0})
@@ -83,6 +56,8 @@ async def send_main_menu(event: types.Message | CallbackQuery):
     if user_id == ADMIN_ID:
         keyboard_buttons.append([InlineKeyboardButton(text="⚙️ এডমিন প্যানেল", callback_data="admin_panel")])
     
+    keyboard_buttons.append([InlineKeyboardButton(text="📢 আমাদের চ্যানেল", url="https://t.me/QuickTaskPay")])
+    
     keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
     
     if isinstance(event, types.Message):
@@ -91,18 +66,7 @@ async def send_main_menu(event: types.Message | CallbackQuery):
         await event.message.edit_text(text, reply_markup=keyboard)
         await event.answer()
 
-@dp.callback_query(F.data == "check_join")
-async def process_check_join(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    if await check_subscription(user_id):
-        if not await users_col.find_one({"user_id": user_id}):
-            await users_col.insert_one({"user_id": user_id, "balance": 10.0})
-        await callback.message.delete()
-        await send_main_menu(callback)
-    else:
-        await callback.answer("❌ আপনি এখনো চ্যানেলে জয়েন করেননি! আগে জয়েন করুন।", show_alert=True)
-
-# --- ৩. বাই মেনু ও কান্ট্রি স্টক লিস্ট ---
+# --- বাই মেনু ও কান্ট্রি স্টক লিস্ট ---
 @dp.callback_query(F.data == "buy_menu")
 async def process_buy_menu(callback: CallbackQuery):
     pipeline = [{"$group": {"_id": "$country", "count": {"$sum": 1}, "price": {"$first": "$price"}}}]
@@ -128,7 +92,7 @@ async def process_buy_menu(callback: CallbackQuery):
     await callback.message.edit_text("<b>যে দেশের অ্যাকাউন্ট বা নাম্বার কিনতে চান সিলেক্ট করুন:</b>", reply_markup=keyboard)
     await callback.answer()
 
-# --- ৪. অ্যাকাউন্ট ক্রয় ও ডেলিভারি ---
+# --- অ্যাকাউন্ট ক্রয় ও ডেলিভারি ---
 @dp.callback_query(F.data.startswith("buy_country_"))
 async def process_buy_item(callback: CallbackQuery):
     country_name = callback.data.replace("buy_country_", "")
@@ -167,7 +131,7 @@ async def process_buy_item(callback: CallbackQuery):
     
     await callback.message.edit_text(delivery_text, reply_markup=keyboard)
 
-# --- ৫. এডমিন প্যানেল ---
+# --- এডমিন প্যানেল ---
 @dp.callback_query(F.data == "admin_panel")
 async def admin_panel(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -251,7 +215,7 @@ async def add_balance_prompt(callback: CallbackQuery):
 
 async def main():
     logging.basicConfig(level=logging.INFO)
-    print("Bot is running smoothly...")
+    print("Bot is running without channel subscription check...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
