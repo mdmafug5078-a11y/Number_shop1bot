@@ -90,7 +90,7 @@ async def add_balance_info(message: types.Message):
     text = (
         f"💳 **How to Add Balance:**\n\n"
         f"Contact the admin to top up your account balance.\n"
-        f"📞 **Admin Contact:** @Admin"
+        f"📞 **Admin Contact:** @mh_mafug"
     )
     await message.answer(text, parse_mode="Markdown", reply_markup=get_main_keyboard(message.from_user.id))
 
@@ -99,7 +99,7 @@ async def support_handler(message: types.Message):
     text = (
         f"🛠️ **Customer Support:**\n\n"
         f"Need help? Feel free to contact our official support team:\n"
-        f"👉 @SupportChannel"
+        f"👉 @QuickTaskPay"
     )
     await message.answer(text, parse_mode="Markdown", reply_markup=get_main_keyboard(message.from_user.id))
 
