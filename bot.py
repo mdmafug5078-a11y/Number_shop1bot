@@ -262,14 +262,7 @@ async def process_stock_file(message: types.Message, state: FSMContext):
             
             # Check if file is .xlsx or .xls
             if message.document.file_name.endswith(('.xlsx', '.xls')):
-                temp_filename = f"temp_{message.from_user.id}.xlsx"
-                with open(temp_filename, "wb") as f:
-                    f.write(downloaded_file)
-                
-                df = pd.read_excel(temp_filename, header=None)
-                if os.path.exists(temp_filename):
-                    os.remove(temp_filename)
-                
+                df = pd.read_excel(downloaded_file, header=None)
                 for _, row in df.iterrows():
                     if len(row) >= 3 and pd.notna(row[0]) and pd.notna(row[1]) and pd.notna(row[2]):
                         parsed_items.append({
@@ -279,7 +272,7 @@ async def process_stock_file(message: types.Message, state: FSMContext):
                         })
             else:
                 # Text file handling
-                text_content = downloaded_file.decode("utf-8")
+                text_content = downloaded_file.read().decode("utf-8")
                 lines = text_content.strip().split("\n")
                 for line in lines:
                     parts = line.replace(",", "\t").split()
@@ -422,7 +415,7 @@ async def execute_delete_country(callback: types.CallbackQuery):
     await callback.answer()
 
 @dp.callback_query(F.data == "admin_back")
-async def admin_back(callback: types.CallbackQuery):
+async def admin_back(callback: types.CategoryQuery if 'CategoryQuery' in globals() else types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         return
     admin_markup = InlineKeyboardMarkup(inline_keyboard=[
