@@ -31,9 +31,8 @@ def keep_alive():
 BOT_TOKEN = "9046722307:AAEGYeQsoPeLiiwcR1Q1RvkRrdm70u8G3VE"
 MONGO_URI = "mongodb+srv://mdmafug5078_db_user:3Zw3FhgLlmUhF2sF@cluster0.gzd3tr1.mongodb.net/otp_shop_bot?retryWrites=true&w=majority"
 ADMIN_ID = 7310456453  # Your Fixed Admin ID
-NOTIFICATION_CHANNEL = "@QuickTaskPay"  # যে চ্যানেলে স্টক অ্যাড হলে নোটিফিকেশন যাবে
-SUPPORT_USERNAME = "@mh_mafug" # সাপোর্টের ইউজারনেম
-MIN_DEPOSIT = 50.0
+NOTIFICATION_CHANNEL = "@QuickTaskPay"  
+SUPPORT_USERNAME = "@mh_mafug" 
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -44,7 +43,7 @@ users_collection = db["users"]
 accounts_collection = db["accounts"]
 channels_collection = db["channels"]
 deposits_collection = db["deposits"]
-settings_collection = db["settings"] # সেটিংসের জন্য কালেকশন
+settings_collection = db["settings"] 
 
 # --- FSM States ---
 class AddStockState(StatesGroup):
@@ -65,15 +64,24 @@ class DepositState(StatesGroup):
 class PaymentSettingsState(StatesGroup):
     waiting_for_bkash = State()
     waiting_for_nagad = State()
+    waiting_for_min_deposit = State()
+
+class BroadcastState(StatesGroup):
+    waiting_for_message = State()
 
 # --- Helper Functions for Settings ---
-async def get_payment_numbers():
+async def get_bot_settings():
     settings = await settings_collection.find_one({"type": "payment_numbers"})
     if not settings:
-        default_settings = {"type": "payment_numbers", "bkash": "01712345678", "nagad": "01812345678"}
+        default_settings = {
+            "type": "payment_numbers", 
+            "bkash": "01712345678", 
+            "nagad": "01812345678",
+            "min_deposit": 50.0
+        }
         await settings_collection.insert_one(default_settings)
-        return default_settings["bkash"], default_settings["nagad"]
-    return settings.get("bkash", "01712345678"), settings.get("nagad", "01812345678")
+        return default_settings
+    return settings
 
 # --- Main Menu Keyboard ---
 def get_main_keyboard(user_id):
@@ -174,10 +182,13 @@ async def add_balance_start(message: types.Message, state: FSMContext):
     if user and user.get("isBanned", False):
         return await message.answer(f"You are banned from this bot!\nFor support contact: {SUPPORT_USERNAME}")
     
+    settings = await get_bot_settings()
+    min_dep = settings.get("min_deposit", 50.0)
+
     await state.set_state(DepositState.waiting_for_amount)
     await message.answer(
         f"Deposit System\n\n"
-        f"Minimum Deposit: {MIN_DEPOSIT} BDT\n\n"
+        f"Minimum Deposit: {min_dep} BDT\n\n"
         f"Please enter the amount you want to deposit (e.g., 100):",
         parse_mode="Markdown"
     )
@@ -194,14 +205,18 @@ async def process_deposit_amount(message: types.Message, state: FSMContext):
     except ValueError:
         return await message.reply("Invalid amount! Please enter a valid number.")
 
-    if amount < MIN_DEPOSIT:
-        return await message.reply(f"Minimum deposit amount is {MIN_DEPOSIT} BDT. Please enter a higher amount:")
+    settings = await get_bot_settings()
+    min_dep = settings.get("min_deposit", 50.0)
+
+    if amount < min_dep:
+        return await message.reply(f"Minimum deposit amount is {min_dep} BDT. Please enter a higher amount:")
 
     await state.update_data(deposit_amount=amount)
     await state.set_state(DepositState.waiting_for_trxid)
 
-    # ডাটাবেস থেকে বর্তমান বিকাশ ও নগদ নাম্বার ফেচ করা
-    bkash_num, nagad_num = await get_payment_numbers()
+    settings = await get_bot_settings()
+    bkash_num = settings.get("bkash", "01712345678")
+    nagad_num = settings.get("nagad", "01812345678")
 
     text = (
         f"Deposit Amount: {amount} BDT\n\n"
@@ -300,7 +315,7 @@ async def support_handler(message: types.Message):
     if user and user.get("isBanned", False):
         return await message.answer(f"You are banned from this bot!\nFor support contact: {SUPPORT_USERNAME}")
         
-    await message.answer(f"Customer Support:\n👉 {SUPPORT_USERNAME}", parse_mode="Markdown", reply_markup=get_main_keyboard(message.from_user.id))
+    await message.answer(f"Customer Support:\n👉 {SUPPORT_USERNAME}", parse_mode="Markdown", reply_markup=get_main_keyboard(user_id))
 
 @dp.message(F.text.in_(["My Referral", "How to Work"]))
 async def general_features(message: types.Message):
@@ -309,7 +324,7 @@ async def general_features(message: types.Message):
     if user and user.get("isBanned", False):
         return await message.answer(f"You are banned from this bot!\nFor support contact: {SUPPORT_USERNAME}")
         
-    await message.answer(f"{message.text} feature is coming soon!", parse_mode="Markdown", reply_markup=get_main_keyboard(message.from_user.id))
+    await message.answer(f"{message.text} feature is coming soon!", parse_mode="Markdown", reply_markup=get_main_keyboard(user_id))
 
 # --- Buy Number Menu ---
 @dp.message(F.text == "Buy Number")
@@ -356,7 +371,7 @@ async def process_purchase(callback: types.CallbackQuery):
         f"OTP / Code: `{account['otp']}`\n"
         f"Password: `{account['password']}`\n"
         f"-----------------------------------------\n"
-        f"Please use the account within 24 hours."
+        f"Please use the account within 1 hour."
     )
     await callback.message.edit_text(success_text, parse_mode="Markdown")
     await callback.answer()
@@ -367,7 +382,7 @@ async def back_to_menu(callback: types.CallbackQuery):
     await callback.message.answer("Main Menu:", parse_mode="Markdown", reply_markup=get_main_keyboard(callback.from_user.id))
     await callback.answer()
 
-# --- ADMIN PANEL & PAYMENT SETTINGS ---
+# --- ADMIN PANEL & HIGH SECURITY CONTROLS ---
 @dp.message(F.text == "Admin Panel")
 async def admin_panel_button(message: types.Message):
     if message.from_user.id != ADMIN_ID:
@@ -378,31 +393,97 @@ async def admin_panel_button(message: types.Message):
             [InlineKeyboardButton(text="User Info", callback_data="admin_user_info")],
             [InlineKeyboardButton(text="Number Management", callback_data="admin_stock")],
             [InlineKeyboardButton(text="Payment Numbers Setup", callback_data="admin_pay_settings")],
+            [InlineKeyboardButton(text="Broadcast Message", callback_data="admin_broadcast")],
             [InlineKeyboardButton(text="Manage Channels", callback_data="admin_channels"), InlineKeyboardButton(text="Bot Status", callback_data="admin_status")]
         ]
     )
     await message.answer("ADMIN PANEL\n-----------------------------------------", parse_mode="Markdown", reply_markup=admin_markup)
 
-# --- Payment Numbers Admin Settings ---
+# --- Broadcast Feature ---
+@dp.callback_query(F.data == "admin_broadcast")
+async def start_broadcast(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        return await callback.answer("Unauthorized!", show_alert=True)
+    
+    await state.set_state(BroadcastState.waiting_for_message)
+    await callback.message.answer("Please send the message, photo, or media you want to broadcast to all members:", parse_mode="Markdown")
+    await callback.answer()
+
+@dp.message(BroadcastState.waiting_for_message)
+async def execute_broadcast(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    
+    await state.clear()
+    status_msg = await message.reply("Broadcast started...")
+    
+    cursor = users_collection.find({})
+    users = await cursor.to_list(length=None)
+    
+    success_count = 0
+    fail_count = 0
+    
+    for user in users:
+        uid = user.get("userId")
+        try:
+            await message.send_copy(chat_id=uid)
+            success_count += 1
+            await asyncio.sleep(0.05) # Telegram API flood limit রোধ করতে
+        except Exception:
+            fail_count += 1
+            
+    await status_msg.edit_text(f"Broadcast Completed!\n\nSuccess: {success_count}\nFailed: {fail_count}")
+
+# --- Payment Numbers & Deposit Settings Admin ---
 @dp.callback_query(F.data == "admin_pay_settings")
 async def admin_payment_settings(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         return await callback.answer("Unauthorized!", show_alert=True)
     
-    bkash_num, nagad_num = await get_payment_numbers()
+    settings = await get_bot_settings()
     
     text = (
-        f"Payment Numbers Setup\n\n"
-        f"Current bKash Number: `{bkash_num}`\n"
-        f"Current Nagad Number: `{nagad_num}`\n\n"
-        f"Click below to change numbers:"
+        f"Payment & Deposit Settings\n\n"
+        f"bKash Number: `{settings.get('bkash')}`\n"
+        f"Nagad Number: `{settings.get('nagad')}`\n"
+        f"Minimum Deposit: `{settings.get('min_deposit')} BDT`\n\n"
+        f"Manage below:"
     )
     markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Change bKash Number", callback_data="set_bkash")],
-        [InlineKeyboardButton(text="Change Nagad Number", callback_data="set_nagad")],
+        [InlineKeyboardButton(text="Change bKash", callback_data="set_bkash"), InlineKeyboardButton(text="Change Nagad", callback_data="set_nagad")],
+        [InlineKeyboardButton(text="Minimum Deposit", callback_data="set_mindep"), InlineKeyboardButton(text="Pending Deposits", callback_data="admin_pending_deps")],
         [InlineKeyboardButton(text="Back", callback_data="admin_back")]
     ])
     await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=markup)
+    await callback.answer()
+
+@dp.callback_query(F.data == "admin_pending_deps")
+async def show_pending_deposits(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        return await callback.answer("Unauthorized!", show_alert=True)
+        
+    cursor = deposits_collection.find({"status": "pending"})
+    pending_list = await cursor.to_list(length=None)
+    
+    if not pending_list:
+        return await callback.answer("No pending deposit requests found!", show_alert=True)
+        
+    await callback.message.delete()
+    for dep in pending_list:
+        dep_id = str(dep["_id"])
+        text = (
+            f"Pending Deposit\n\n"
+            f"User ID: `{dep['userId']}`\n"
+            f"Amount: {dep['amount']} BDT\n"
+            f"TrxID: `{dep['trxid']}`"
+        )
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Approve", callback_data=f"dep_approve_{dep_id}"),
+                InlineKeyboardButton(text="Reject", callback_data=f"dep_reject_{dep_id}")
+            ]
+        ])
+        await callback.message.answer(text, parse_mode="Markdown", reply_markup=markup)
     await callback.answer()
 
 @dp.callback_query(F.data == "set_bkash")
@@ -418,11 +499,11 @@ async def save_bkash_number(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
     new_bkash = message.text.strip()
-    _, nagad_num = await get_payment_numbers()
+    settings = await get_bot_settings()
     
     await settings_collection.update_one(
         {"type": "payment_numbers"},
-        {"$set": {"bkash": new_bkash, "nagad": nagad_num}},
+        {"$set": {"bkash": new_bkash, "nagad": settings.get("nagad"), "min_deposit": settings.get("min_deposit")}},
         upsert=True
     )
     await state.clear()
@@ -441,15 +522,41 @@ async def save_nagad_number(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
     new_nagad = message.text.strip()
-    bkash_num, _ = await get_payment_numbers()
+    settings = await get_bot_settings()
     
     await settings_collection.update_one(
         {"type": "payment_numbers"},
-        {"$set": {"bkash": bkash_num, "nagad": new_nagad}},
+        {"$set": {"bkash": settings.get("bkash"), "nagad": new_nagad, "min_deposit": settings.get("min_deposit")}},
         upsert=True
     )
     await state.clear()
     await message.reply(f"Successfully updated Nagad number to: `{new_nagad}`", parse_mode="Markdown")
+
+@dp.callback_query(F.data == "set_mindep")
+async def prompt_set_mindep(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(PaymentSettingsState.waiting_for_min_deposit)
+    await callback.message.answer("Please enter the new Minimum Deposit amount (e.g. 50):", parse_mode="Markdown")
+    await callback.answer()
+
+@dp.message(PaymentSettingsState.waiting_for_min_deposit)
+async def save_min_deposit(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    try:
+        new_min = float(message.text.strip())
+    except ValueError:
+        return await message.reply("Invalid amount!")
+        
+    settings = await get_bot_settings()
+    await settings_collection.update_one(
+        {"type": "payment_numbers"},
+        {"$set": {"bkash": settings.get("bkash"), "nagad": settings.get("nagad"), "min_deposit": new_min}},
+        upsert=True
+    )
+    await state.clear()
+    await message.reply(f"Successfully updated Minimum Deposit to: `৳{new_min}`", parse_mode="Markdown")
 
 # --- User Info Flow ---
 @dp.callback_query(F.data == "admin_user_info")
@@ -697,13 +804,14 @@ async def admin_back(callback: types.CallbackQuery):
         [InlineKeyboardButton(text="User Info", callback_data="admin_user_info")],
         [InlineKeyboardButton(text="Number Management", callback_data="admin_stock")],
         [InlineKeyboardButton(text="Payment Numbers Setup", callback_data="admin_pay_settings")],
+        [InlineKeyboardButton(text="Broadcast Message", callback_data="admin_broadcast")],
         [InlineKeyboardButton(text="Manage Channels", callback_data="admin_channels"), InlineKeyboardButton(text="Bot Status", callback_data="admin_status")]
     ])
     await callback.message.edit_text("ADMIN PANEL\n-----------------------------------------", parse_mode="Markdown", reply_markup=admin_markup)
     await callback.answer()
 
 async def main():
-    print("Bot is running with Dynamic Payment Settings...")
+    print("Secure Bot is running smoothly...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
