@@ -8,11 +8,11 @@ from aiogram.enums import ParseMode
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # --- কনফিগারেশন ---
-BOT_TOKEN = "9046722307:AAEGYeQsoPeLiiwcR1Q1RvkRrdm70u8G3VE"      # আপনার বটের আসল টোকেন বসান
-CHANNEL_ID = "@QuickTaskPay"    # আপনার চ্যানেল ইউজারনেম (যেমন: @earnwithmafug) - অবশ্যই বটকে চ্যানেলের Admin বানাবেন!
+BOT_TOKEN = "9046722307:AAEGYeQsoPeLiiwcR1Q1RvkRrdm70u8G3VE"      
+CHANNEL_ID = "@QuickTaskPay"    # আপনার চ্যানেল ইউজারনেম
 ADMIN_ID = 7310456453                  # আপনার টেলিগ্রাম আইডি
 
-# MongoDB ক্লাউড ডাটাবেস কানেকশন (আপনার আসল পাসওয়ার্ড দিন)
+# MongoDB ক্লাউড ডাটাবেস কানেকশন (আপনার পাসওয়ার্ডটি বসিয়ে নিন)
 MONGO_URL = "mongodb+srv://mdmafug3016_db_user:YOUR_PASSWORD@cluster.mongodb.net/?retryWrites=true&w=majority"
 db_client = AsyncIOMotorClient(MONGO_URL)
 db = db_client["telegram_shop_db"]
@@ -20,13 +20,13 @@ db = db_client["telegram_shop_db"]
 users_col = db["users"]
 stocks_col = db["stocks"]
 
-# HTML পার্স মোড সহ বট ইনিশিয়ালাইজেশন (Aiogram 3.7+ সাপোর্টেড)
+# HTML পার্স মোড সহ বট ইনিশিয়ালাইজেশন
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
 # --- ১. চ্যানেল মেম্বারশিপ চেক ---
 async def check_subscription(user_id: int) -> bool:
-    if user_id == ADMIN_ID:  # এডমিনের জন্য চ্যানেল চেক বাইপাস
+    if user_id == ADMIN_ID:  # এডমিনের জন্য চ্যানেল চেক সবসময় বাইপাস থাকবে
         return True
     try:
         member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
