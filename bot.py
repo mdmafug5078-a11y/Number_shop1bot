@@ -659,7 +659,8 @@ async def prompt_set_bkash(callback: types.CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
         return
     await state.set_state(PaymentSettingsState.waiting_for_bkash)
-    await callback.message.answer("Please send the new bKash personal number:", parse_mode="Markdown")
+    markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Cancel / Back", callback_data="admin_pay_settings")]])
+    await callback.message.edit_text("Please send the new bKash personal number:", reply_markup=markup)
     await callback.answer()
 
 @dp.message(PaymentSettingsState.waiting_for_bkash)
@@ -688,7 +689,8 @@ async def prompt_set_nagad(callback: types.CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
         return
     await state.set_state(PaymentSettingsState.waiting_for_nagad)
-    await callback.message.answer("Please send the new Nagad personal number:", parse_mode="Markdown")
+    markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Cancel / Back", callback_data="admin_pay_settings")]])
+    await callback.message.edit_text("Please send the new Nagad personal number:", reply_markup=markup)
     await callback.answer()
 
 @dp.message(PaymentSettingsState.waiting_for_nagad)
@@ -717,7 +719,8 @@ async def prompt_set_mindep(callback: types.CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
         return
     await state.set_state(PaymentSettingsState.waiting_for_min_deposit)
-    await callback.message.answer("Please enter the new Minimum Deposit amount (e.g. 20):", parse_mode="Markdown")
+    markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Cancel / Back", callback_data="admin_pay_settings")]])
+    await callback.message.edit_text("Please enter the new Minimum Deposit amount (e.g. 20):", reply_markup=markup)
     await callback.answer()
 
 @dp.message(PaymentSettingsState.waiting_for_min_deposit)
@@ -749,7 +752,8 @@ async def prompt_set_support(callback: types.CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
         return
     await state.set_state(PaymentSettingsState.waiting_for_support)
-    await callback.message.answer("Please enter the new Support Username (e.g. @mh_mafug):", parse_mode="Markdown")
+    markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Cancel / Back", callback_data="admin_pay_settings")]])
+    await callback.message.edit_text("Please enter the new Support Username (e.g. @mh_mafug):", reply_markup=markup)
     await callback.answer()
 
 @dp.message(PaymentSettingsState.waiting_for_support)
@@ -780,7 +784,8 @@ async def prompt_set_howtowork(callback: types.CallbackQuery, state: FSMContext)
     if callback.from_user.id != ADMIN_ID:
         return
     await state.set_state(PaymentSettingsState.waiting_for_how_to_work)
-    await callback.message.answer("Please send the 'How to Work' text, video link, or instructions:", parse_mode="Markdown")
+    markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Cancel / Back", callback_data="admin_pay_settings")]])
+    await callback.message.edit_text("Please send the 'How to Work' text, video link, or instructions:", reply_markup=markup)
     await callback.answer()
 
 @dp.message(PaymentSettingsState.waiting_for_how_to_work)
@@ -1126,7 +1131,7 @@ async def admin_back(callback: types.CallbackQuery):
         [InlineKeyboardButton(text="Number Management", callback_data="admin_stock")],
         [InlineKeyboardButton(text="Payment Numbers Setup", callback_data="admin_pay_settings")],
         [InlineKeyboardButton(text="Broadcast Message", callback_data="admin_broadcast")],
-        [InlineKeyboardButton(text="Manage Channels", callback_data="admin_channels"), InlineKeyboardButton(text="BotStatus", callback_data="admin_status")]
+        [InlineKeyboardButton(text="Manage Channels", callback_data="admin_channels"), InlineKeyboardButton(text="Bot Status", callback_data="admin_status")]
     ])
     await callback.message.edit_text("ADMIN PANEL\n-----------------------------------------", parse_mode="Markdown", reply_markup=admin_markup)
     await callback.answer()
