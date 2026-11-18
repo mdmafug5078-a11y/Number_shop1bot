@@ -69,6 +69,9 @@ class PaymentSettingsState(StatesGroup):
 class BroadcastState(StatesGroup):
     waiting_for_message = State()
 
+class UpdatePriceState(StatesGroup):
+    waiting_for_new_price = State()
+
 # --- Helper Functions for Settings ---
 async def get_bot_settings():
     settings = await settings_collection.find_one({"type": "payment_numbers"})
@@ -428,7 +431,7 @@ async def execute_broadcast(message: types.Message, state: FSMContext):
         try:
             await message.send_copy(chat_id=uid)
             success_count += 1
-            await asyncio.sleep(0.05) # Telegram API flood limit রোধ করতে
+            await asyncio.sleep(0.05)
         except Exception:
             fail_count += 1
             
@@ -670,7 +673,7 @@ async def process_balance_action(message: types.Message, state: FSMContext):
     action_text = "added to" if action_type == "baladd" else "removed from"
     await message.reply(f"Successfully {action_text} user `{target_uid}`. New balance: ৳{new_bal}", parse_mode="Markdown")
 
-# --- Number Management ---
+# --- Number Management & Country Click Fix ---
 @dp.callback_query(F.data == "admin_stock")
 async def admin_number_management(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -691,6 +694,81 @@ async def admin_number_management(callback: types.CallbackQuery):
     inline_buttons.append([InlineKeyboardButton(text="Back to Admin", callback_data="admin_back")])
     
     await callback.message.edit_text("Number Management\nSelect a country to manage or add new stock:", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(inline_keyboard=inline_buttons))
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("manage_country_"))
+async def manage_single_country(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        return await callback.answer("Unauthorized!", show_alert=True)
+    
+    country = callback.data.replace("manage_country_", "")
+    total = await accounts_collection.count_documents({"country": country})
+    sold = await accounts_collection.count_documents({"country": country, "isSold": True})
+    available = await accounts_collection.count_documents({"country": country, "isSold": False})
+    
+    sample = await accounts_collection.find_one({"country": country})
+    price = sample["price"] if sample else 0.0
+
+    text = (
+        f"Country: {country}\n"
+        f"Current Price: ৳{price}\n"
+        f"Total Stock: {total}\n"
+        f"Available: {available}\n"
+        f"Sold: {sold}"
+    )
+
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Stock Add", callback_data=f"m_add_{country}"), InlineKeyboardButton(text="Price Change", callback_data=f"m_price_{country}")],
+        [InlineKeyboardButton(text="Delete Number", callback_data=f"m_del_{country}")],
+        [InlineKeyboardButton(text="Back to List", callback_data="admin_stock")]
+    ])
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=markup)
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("m_price_"))
+async def prompt_change_price(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    country = callback.data.replace("m_price_", "")
+    await state.update_data(target_country=country)
+    await state.set_state(UpdatePriceState.waiting_for_new_price)
+    await callback.message.answer(f"Enter new price for **{country}**:", parse_mode="Markdown")
+    await callback.answer()
+
+@dp.message(UpdatePriceState.waiting_for_new_price)
+async def apply_new_price(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    try:
+        new_price = float(message.text.strip())
+    except ValueError:
+        return await message.reply("Invalid price!")
+
+    data = await state.get_data()
+    country = data.get("target_country")
+    await accounts_collection.update_many({"country": country}, {"$set": {"price": new_price}})
+    await state.clear()
+    await message.reply(f"Price updated to ৳{new_price} for all **{country}** accounts!", parse_mode="Markdown")
+
+@dp.callback_query(F.data.startswith("m_del_"))
+async def confirm_delete_country(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    country = callback.data.replace("m_del_", "")
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Yes, Delete All", callback_data=f"confirm_del_{country}")],
+        [InlineKeyboardButton(text="Cancel", callback_data=f"manage_country_{country}")]
+    ])
+    await callback.message.edit_text(f"Are you sure you want to delete all unsold stock for **{country}**?", parse_mode="Markdown", reply_markup=markup)
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("confirm_del_"))
+async def execute_delete_country(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    country = callback.data.replace("confirm_del_", "")
+    await accounts_collection.delete_many({"country": country, "isSold": False})
+    await callback.message.edit_text(f"Unsold stock for **{country}** has been removed successfully!", parse_mode="Markdown")
     await callback.answer()
 
 @dp.callback_query(F.data == "add_stock_start")
