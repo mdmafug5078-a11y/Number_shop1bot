@@ -212,7 +212,7 @@ async def general_features(message: types.Message):
         
     await message.answer(f"{message.text} feature is coming soon!", parse_mode="Markdown", reply_markup=get_main_keyboard(user_id))
 
-# --- Manual Deposit Flow ---
+# --- Manual Deposit Flow (With Method Selection: bKash / Nagad) ---
 @dp.message(F.text == "Add Balance")
 async def add_balance_start(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
@@ -223,15 +223,39 @@ async def add_balance_start(message: types.Message, state: FSMContext):
     if user and user.get("isBanned", False):
         return await message.answer(f"You are banned from this bot!\nFor support contact: {support_user}")
     
+    await state.clear()
     min_dep = settings.get("min_deposit", 50.0)
 
-    await state.set_state(DepositState.waiting_for_amount)
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="bKash", callback_data="dep_method_bKash"),
+            InlineKeyboardButton(text="Nagad", callback_data="dep_method_Nagad")
+        ]
+    ])
     await message.answer(
         f"Deposit System\n\n"
+        f"Minimum Deposit: {min_dep} BDT\n\n"
+        f"Please select your payment method:",
+        parse_mode="Markdown",
+        reply_markup=markup
+    )
+
+@dp.callback_query(F.data.startswith("dep_method_"))
+async def select_deposit_method(callback: types.CallbackQuery, state: FSMContext):
+    method = callback.data.replace("dep_method_", "")
+    settings = await get_bot_settings()
+    min_dep = settings.get("min_deposit", 50.0)
+
+    await state.update_data(deposit_method=method)
+    await state.set_state(DepositState.waiting_for_amount)
+
+    await callback.message.edit_text(
+        f"Selected Method: {method}\n"
         f"Minimum Deposit: {min_dep} BDT\n\n"
         f"Please enter the amount you want to deposit (e.g., 100):",
         parse_mode="Markdown"
     )
+    await callback.answer()
 
 @dp.message(DepositState.waiting_for_amount)
 async def process_deposit_amount(message: types.Message, state: FSMContext):
@@ -253,17 +277,19 @@ async def process_deposit_amount(message: types.Message, state: FSMContext):
     if amount < min_dep:
         return await message.reply(f"Minimum deposit amount is {min_dep} BDT. Please enter a higher amount:")
 
+    data = await state.get_data()
+    method = data.get("deposit_method", "bKash")
+
     await state.update_data(deposit_amount=amount)
     await state.set_state(DepositState.waiting_for_trxid)
 
-    bkash_num = settings.get("bkash", "01712345678")
-    nagad_num = settings.get("nagad", "01812345678")
+    target_number = settings.get("bkash", "01712345678") if method == "bKash" else settings.get("nagad", "01812345678")
 
     text = (
+        f"Method: {method}\n"
         f"Deposit Amount: {amount} BDT\n\n"
-        f"Please Send Money to our numbers below:\n\n"
-        f"bKash (Personal): `{bkash_num}`\n"
-        f"Nagad (Personal): `{nagad_num}`\n\n"
+        f"Please Send Money to our {method} number below:\n\n"
+        f"{method} (Personal): `{target_number}`\n\n"
         f"Note: You must use 'Send Money' option.\n\n"
         f"After sending money, please reply with your Transaction ID (TrxID):"
     )
@@ -282,12 +308,14 @@ async def process_deposit_trxid(message: types.Message, state: FSMContext):
     trxid = message.text.strip()
     data = await state.get_data()
     amount = data.get("deposit_amount")
+    method = data.get("deposit_method", "bKash")
     user_full_name = message.from_user.full_name
 
     await state.clear()
 
     deposit_doc = {
         "userId": user_id,
+        "method": method,
         "amount": amount,
         "trxid": trxid,
         "status": "pending"
@@ -300,6 +328,7 @@ async def process_deposit_trxid(message: types.Message, state: FSMContext):
     admin_text = (
         f"New Deposit Request!\n\n"
         f"User: {user_full_name} (`{user_id}`)\n"
+        f"Method: {method}\n"
         f"Amount: {amount} BDT\n"
         f"TrxID: `{trxid}`"
     )
@@ -591,9 +620,11 @@ async def show_pending_deposits(callback: types.CallbackQuery):
     await callback.message.delete()
     for dep in pending_list:
         dep_id = str(dep["_id"])
+        method = dep.get("method", "Unknown")
         text = (
             f"Pending Deposit\n\n"
             f"User ID: `{dep['userId']}`\n"
+            f"Method: {method}\n"
             f"Amount: {dep['amount']} BDT\n"
             f"TrxID: `{dep['trxid']}`"
         )
