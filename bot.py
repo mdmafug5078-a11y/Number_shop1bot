@@ -32,7 +32,6 @@ BOT_TOKEN = "9046722307:AAEGYeQsoPeLiiwcR1Q1RvkRrdm70u8G3VE"
 MONGO_URI = "mongodb+srv://mdmafug5078_db_user:3Zw3FhgLlmUhF2sF@cluster0.gzd3tr1.mongodb.net/otp_shop_bot?retryWrites=true&w=majority"
 ADMIN_ID = 7310456453  # Your Fixed Admin ID
 NOTIFICATION_CHANNEL = "@QuickTaskPay"  
-SUPPORT_USERNAME = "@mh_mafug" 
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -65,12 +64,17 @@ class PaymentSettingsState(StatesGroup):
     waiting_for_bkash = State()
     waiting_for_nagad = State()
     waiting_for_min_deposit = State()
+    waiting_for_support = State()
 
 class BroadcastState(StatesGroup):
     waiting_for_message = State()
 
 class UpdatePriceState(StatesGroup):
     waiting_for_new_price = State()
+
+class AddChannelState(StatesGroup):
+    waiting_for_name = State()
+    waiting_for_link = State()
 
 # --- Helper Functions for Settings ---
 async def get_bot_settings():
@@ -80,7 +84,8 @@ async def get_bot_settings():
             "type": "payment_numbers", 
             "bkash": "01712345678", 
             "nagad": "01812345678",
-            "min_deposit": 50.0
+            "min_deposit": 50.0,
+            "support": "@mh_mafug"
         }
         await settings_collection.insert_one(default_settings)
         return default_settings
@@ -127,10 +132,13 @@ async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
     
+    settings = await get_bot_settings()
+    support_user = settings.get("support", "@mh_mafug")
+
     allowed, data = await check_user_access(user_id)
     if not allowed:
         if data == "banned":
-            return await message.answer(f"You are banned from this bot!\nFor support contact: {SUPPORT_USERNAME}")
+            return await message.answer(f"You are banned from this bot!\nFor support contact: {support_user}")
         
         inline_buttons = [[InlineKeyboardButton(text=f"Join {ch['name']}", url=ch['invite_link'])] for ch in data]
         inline_buttons.append([InlineKeyboardButton(text="Joined, Check Again", callback_data="check_subscription")])
@@ -169,23 +177,52 @@ async def process_check_sub(callback: types.CallbackQuery):
 @dp.message(F.text == "Profile")
 async def profile_handler(message: types.Message):
     user_id = message.from_user.id
+    settings = await get_bot_settings()
+    support_user = settings.get("support", "@mh_mafug")
+    
     user = await users_collection.find_one({"userId": user_id})
     if user and user.get("isBanned", False):
-        return await message.answer(f"You are banned from this bot!\nFor support contact: {SUPPORT_USERNAME}")
+        return await message.answer(f"You are banned from this bot!\nFor support contact: {support_user}")
     
     balance = user['balance'] if user else 0.0
     text = f"Account Information:\n\nName: {message.from_user.full_name}\nUser ID: `{user_id}`\nBalance: ৳{balance}"
     await message.answer(text, parse_mode="Markdown", reply_markup=get_main_keyboard(user_id))
 
+@dp.message(F.text == "Support")
+async def support_handler(message: types.Message):
+    user_id = message.from_user.id
+    settings = await get_bot_settings()
+    support_user = settings.get("support", "@mh_mafug")
+    
+    user = await users_collection.find_one({"userId": user_id})
+    if user and user.get("isBanned", False):
+        return await message.answer(f"You are banned from this bot!\nFor support contact: {support_user}")
+        
+    await message.answer(f"Customer Support:\n👉 {support_user}", parse_mode="Markdown", reply_markup=get_main_keyboard(user_id))
+
+@dp.message(F.text.in_(["My Referral", "How to Work"]))
+async def general_features(message: types.Message):
+    user_id = message.from_user.id
+    settings = await get_bot_settings()
+    support_user = settings.get("support", "@mh_mafug")
+    
+    user = await users_collection.find_one({"userId": user_id})
+    if user and user.get("isBanned", False):
+        return await message.answer(f"You are banned from this bot!\nFor support contact: {support_user}")
+        
+    await message.answer(f"{message.text} feature is coming soon!", parse_mode="Markdown", reply_markup=get_main_keyboard(user_id))
+
 # --- Manual Deposit Flow ---
 @dp.message(F.text == "Add Balance")
 async def add_balance_start(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
+    settings = await get_bot_settings()
+    support_user = settings.get("support", "@mh_mafug")
+    
     user = await users_collection.find_one({"userId": user_id})
     if user and user.get("isBanned", False):
-        return await message.answer(f"You are banned from this bot!\nFor support contact: {SUPPORT_USERNAME}")
+        return await message.answer(f"You are banned from this bot!\nFor support contact: {support_user}")
     
-    settings = await get_bot_settings()
     min_dep = settings.get("min_deposit", 50.0)
 
     await state.set_state(DepositState.waiting_for_amount)
@@ -199,16 +236,18 @@ async def add_balance_start(message: types.Message, state: FSMContext):
 @dp.message(DepositState.waiting_for_amount)
 async def process_deposit_amount(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
+    settings = await get_bot_settings()
+    support_user = settings.get("support", "@mh_mafug")
+    
     user = await users_collection.find_one({"userId": user_id})
     if user and user.get("isBanned", False):
-        return await message.answer(f"You are banned from this bot!\nFor support contact: {SUPPORT_USERNAME}")
+        return await message.answer(f"You are banned from this bot!\nFor support contact: {support_user}")
 
     try:
         amount = float(message.text.strip())
     except ValueError:
         return await message.reply("Invalid amount! Please enter a valid number.")
 
-    settings = await get_bot_settings()
     min_dep = settings.get("min_deposit", 50.0)
 
     if amount < min_dep:
@@ -217,7 +256,6 @@ async def process_deposit_amount(message: types.Message, state: FSMContext):
     await state.update_data(deposit_amount=amount)
     await state.set_state(DepositState.waiting_for_trxid)
 
-    settings = await get_bot_settings()
     bkash_num = settings.get("bkash", "01712345678")
     nagad_num = settings.get("nagad", "01812345678")
 
@@ -234,9 +272,12 @@ async def process_deposit_amount(message: types.Message, state: FSMContext):
 @dp.message(DepositState.waiting_for_trxid)
 async def process_deposit_trxid(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
+    settings = await get_bot_settings()
+    support_user = settings.get("support", "@mh_mafug")
+    
     user = await users_collection.find_one({"userId": user_id})
     if user and user.get("isBanned", False):
-        return await message.answer(f"You are banned from this bot!\nFor support contact: {SUPPORT_USERNAME}")
+        return await message.answer(f"You are banned from this bot!\nFor support contact: {support_user}")
 
     trxid = message.text.strip()
     data = await state.get_data()
@@ -311,31 +352,16 @@ async def handle_deposit_action(callback: types.CallbackQuery):
         except Exception:
             pass
 
-@dp.message(F.text == "Support")
-async def support_handler(message: types.Message):
-    user_id = message.from_user.id
-    user = await users_collection.find_one({"userId": user_id})
-    if user and user.get("isBanned", False):
-        return await message.answer(f"You are banned from this bot!\nFor support contact: {SUPPORT_USERNAME}")
-        
-    await message.answer(f"Customer Support:\n👉 {SUPPORT_USERNAME}", parse_mode="Markdown", reply_markup=get_main_keyboard(user_id))
-
-@dp.message(F.text.in_(["My Referral", "How to Work"]))
-async def general_features(message: types.Message):
-    user_id = message.from_user.id
-    user = await users_collection.find_one({"userId": user_id})
-    if user and user.get("isBanned", False):
-        return await message.answer(f"You are banned from this bot!\nFor support contact: {SUPPORT_USERNAME}")
-        
-    await message.answer(f"{message.text} feature is coming soon!", parse_mode="Markdown", reply_markup=get_main_keyboard(user_id))
-
 # --- Buy Number Menu ---
 @dp.message(F.text == "Buy Number")
 async def buy_menu(message: types.Message):
     user_id = message.from_user.id
+    settings = await get_bot_settings()
+    support_user = settings.get("support", "@mh_mafug")
+    
     user = await users_collection.find_one({"userId": user_id})
     if user and user.get("isBanned", False):
-        return await message.answer(f"You are banned from this bot!\nFor support contact: {SUPPORT_USERNAME}")
+        return await message.answer(f"You are banned from this bot!\nFor support contact: {support_user}")
 
     cursor = accounts_collection.find({"isSold": False})
     accounts = await cursor.to_list(length=None)
@@ -402,6 +428,95 @@ async def admin_panel_button(message: types.Message):
     )
     await message.answer("ADMIN PANEL\n-----------------------------------------", parse_mode="Markdown", reply_markup=admin_markup)
 
+# --- Manage Channels Feature ---
+@dp.callback_query(F.data == "admin_channels")
+async def admin_channels_menu(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        return await callback.answer("Unauthorized!", show_alert=True)
+        
+    cursor = channels_collection.find({})
+    channels = await cursor.to_list(length=None)
+    
+    inline_buttons = []
+    for ch in channels:
+        inline_buttons.append([
+            InlineKeyboardButton(text=f"{ch['name']}", callback_data="noop"),
+            InlineKeyboardButton(text="❌", callback_data=f"del_ch_{ch['chat_id']}")
+        ])
+        
+    inline_buttons.append([InlineKeyboardButton(text="Add New Channel", callback_data="add_new_channel")])
+    inline_buttons.append([InlineKeyboardButton(text="Back to Admin", callback_data="admin_back")])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=inline_buttons)
+    await callback.message.edit_text("Manage Force Join Channels", parse_mode="Markdown", reply_markup=keyboard)
+    await callback.answer()
+
+@dp.callback_query(F.data == "add_new_channel")
+async def start_add_channel(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AddChannelState.waiting_for_name)
+    await callback.message.answer("Please enter the Button Name (e.g., Official Group):")
+    await callback.answer()
+
+@dp.message(AddChannelState.waiting_for_name)
+async def process_channel_name(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.update_data(channel_name=message.text)
+    await state.set_state(AddChannelState.waiting_for_link)
+    await message.answer("Please enter the Channel Link or @username (e.g. https://t.me/Channel or @Channel):")
+
+@dp.message(AddChannelState.waiting_for_link)
+async def process_channel_link(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    
+    data = await state.get_data()
+    name = data.get("channel_name")
+    link = message.text.strip()
+    
+    if link.startswith("@"):
+        chat_id = link
+    else:
+        chat_id = "@" + link.split("/")[-1] if "t.me/" in link else link
+
+    await channels_collection.update_one(
+        {"chat_id": chat_id},
+        {"$set": {"name": name, "chat_id": chat_id, "invite_link": link}},
+        upsert=True
+    )
+    
+    await state.clear()
+    await message.reply(f"Successfully added channel:\n<b>{name}</b>", parse_mode="HTML")
+
+@dp.callback_query(F.data.startswith("del_ch_"))
+async def delete_channel_action(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    chat_id = callback.data.replace("del_ch_", "")
+    await channels_collection.delete_one({"chat_id": chat_id})
+    await callback.answer("Channel removed successfully!", show_alert=True)
+    
+    cursor = channels_collection.find({})
+    channels = await cursor.to_list(length=None)
+    
+    inline_buttons = []
+    for ch in channels:
+        inline_buttons.append([
+            InlineKeyboardButton(text=f"{ch['name']}", callback_data="noop"),
+            InlineKeyboardButton(text="❌", callback_data=f"del_ch_{ch['chat_id']}")
+        ])
+    inline_buttons.append([InlineKeyboardButton(text="Add New Channel", callback_data="add_new_channel")])
+    inline_buttons.append([InlineKeyboardButton(text="Back to Admin", callback_data="admin_back")])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=inline_buttons)
+    await callback.message.edit_reply_markup(reply_markup=keyboard)
+
+@dp.callback_query(F.data == "noop")
+async def noop_callback(callback: types.CallbackQuery):
+    await callback.answer()
+
 # --- Broadcast Feature ---
 @dp.callback_query(F.data == "admin_broadcast")
 async def start_broadcast(callback: types.CallbackQuery, state: FSMContext):
@@ -437,7 +552,7 @@ async def execute_broadcast(message: types.Message, state: FSMContext):
             
     await status_msg.edit_text(f"Broadcast Completed!\n\nSuccess: {success_count}\nFailed: {fail_count}")
 
-# --- Payment Numbers & Deposit Settings Admin ---
+# --- Payment Numbers & Support Settings Admin ---
 @dp.callback_query(F.data == "admin_pay_settings")
 async def admin_payment_settings(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -446,15 +561,17 @@ async def admin_payment_settings(callback: types.CallbackQuery):
     settings = await get_bot_settings()
     
     text = (
-        f"Payment & Deposit Settings\n\n"
+        f"Payment & Support Settings\n\n"
         f"bKash Number: `{settings.get('bkash')}`\n"
         f"Nagad Number: `{settings.get('nagad')}`\n"
-        f"Minimum Deposit: `{settings.get('min_deposit')} BDT`\n\n"
+        f"Minimum Deposit: `{settings.get('min_deposit')} BDT`\n"
+        f"Support Username: `{settings.get('support')}`\n\n"
         f"Manage below:"
     )
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Change bKash", callback_data="set_bkash"), InlineKeyboardButton(text="Change Nagad", callback_data="set_nagad")],
-        [InlineKeyboardButton(text="Minimum Deposit", callback_data="set_mindep"), InlineKeyboardButton(text="Pending Deposits", callback_data="admin_pending_deps")],
+        [InlineKeyboardButton(text="Minimum Deposit", callback_data="set_mindep"), InlineKeyboardButton(text="Support Username", callback_data="set_support")],
+        [InlineKeyboardButton(text="Pending Deposits", callback_data="admin_pending_deps")],
         [InlineKeyboardButton(text="Back", callback_data="admin_back")]
     ])
     await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=markup)
@@ -506,7 +623,12 @@ async def save_bkash_number(message: types.Message, state: FSMContext):
     
     await settings_collection.update_one(
         {"type": "payment_numbers"},
-        {"$set": {"bkash": new_bkash, "nagad": settings.get("nagad"), "min_deposit": settings.get("min_deposit")}},
+        {"$set": {
+            "bkash": new_bkash, 
+            "nagad": settings.get("nagad"), 
+            "min_deposit": settings.get("min_deposit"),
+            "support": settings.get("support")
+        }},
         upsert=True
     )
     await state.clear()
@@ -529,7 +651,12 @@ async def save_nagad_number(message: types.Message, state: FSMContext):
     
     await settings_collection.update_one(
         {"type": "payment_numbers"},
-        {"$set": {"bkash": settings.get("bkash"), "nagad": new_nagad, "min_deposit": settings.get("min_deposit")}},
+        {"$set": {
+            "bkash": settings.get("bkash"), 
+            "nagad": new_nagad, 
+            "min_deposit": settings.get("min_deposit"),
+            "support": settings.get("support")
+        }},
         upsert=True
     )
     await state.clear()
@@ -555,11 +682,46 @@ async def save_min_deposit(message: types.Message, state: FSMContext):
     settings = await get_bot_settings()
     await settings_collection.update_one(
         {"type": "payment_numbers"},
-        {"$set": {"bkash": settings.get("bkash"), "nagad": settings.get("nagad"), "min_deposit": new_min}},
+        {"$set": {
+            "bkash": settings.get("bkash"), 
+            "nagad": settings.get("nagad"), 
+            "min_deposit": new_min,
+            "support": settings.get("support")
+        }},
         upsert=True
     )
     await state.clear()
     await message.reply(f"Successfully updated Minimum Deposit to: `৳{new_min}`", parse_mode="Markdown")
+
+@dp.callback_query(F.data == "set_support")
+async def prompt_set_support(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(PaymentSettingsState.waiting_for_support)
+    await callback.message.answer("Please enter the new Support Username (e.g. @mh_mafug):", parse_mode="Markdown")
+    await callback.answer()
+
+@dp.message(PaymentSettingsState.waiting_for_support)
+async def save_support_username(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    new_support = message.text.strip()
+    if not new_support.startswith("@"):
+        new_support = "@" + new_support
+        
+    settings = await get_bot_settings()
+    await settings_collection.update_one(
+        {"type": "payment_numbers"},
+        {"$set": {
+            "bkash": settings.get("bkash"), 
+            "nagad": settings.get("nagad"), 
+            "min_deposit": settings.get("min_deposit"),
+            "support": new_support
+        }},
+        upsert=True
+    )
+    await state.clear()
+    await message.reply(f"Successfully updated Support Username to: `{new_support}`", parse_mode="Markdown")
 
 # --- User Info Flow ---
 @dp.callback_query(F.data == "admin_user_info")
@@ -673,7 +835,7 @@ async def process_balance_action(message: types.Message, state: FSMContext):
     action_text = "added to" if action_type == "baladd" else "removed from"
     await message.reply(f"Successfully {action_text} user `{target_uid}`. New balance: ৳{new_bal}", parse_mode="Markdown")
 
-# --- Number Management & Country Click Fix ---
+# --- Number Management ---
 @dp.callback_query(F.data == "admin_stock")
 async def admin_number_management(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
