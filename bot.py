@@ -28,7 +28,7 @@ def keep_alive():
     t.start()
 
 # --- Bot Configuration ---
-BOT_TOKEN = "9046722307:AAEGYeQsoPeLiiwcR1RvkRrdm70u8G3VE"
+BOT_TOKEN = "9046722307:AAEGYeQsoPeLiiwcR1Q1RvkRrdm70u8G3VE"
 MONGO_URI = "mongodb+srv://mdmafug5078_db_user:3Zw3FhgLlmUhF2sF@cluster0.gzd3tr1.mongodb.net/otp_shop_bot?retryWrites=true&w=majority"
 ADMIN_ID = 7310456453  # Your Fixed Admin ID
 NOTIFICATION_CHANNEL = "@QuickTaskPay"  
@@ -228,7 +228,7 @@ async def referral_handler(message: types.Message):
         
     await message.answer("My Referral feature is coming soon!", parse_mode="Markdown", reply_markup=get_main_keyboard(user_id))
 
-# --- Manual Deposit Flow (With Method Selection: bKash / Nagad) ---
+# --- Manual Deposit Flow ---
 @dp.message(F.text == "Add Balance")
 async def add_balance_start(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
@@ -1126,7 +1126,7 @@ async def admin_back(callback: types.CallbackQuery):
         [InlineKeyboardButton(text="Number Management", callback_data="admin_stock")],
         [InlineKeyboardButton(text="Payment Numbers Setup", callback_data="admin_pay_settings")],
         [InlineKeyboardButton(text="Broadcast Message", callback_data="admin_broadcast")],
-        [InlineKeyboardButton(text="Manage Channels", callback_data="admin_channels"), InlineKeyboardButton(text="Bot Status", callback_data="admin_status")]
+        [InlineKeyboardButton(text="Manage Channels", callback_data="admin_channels"), InlineKeyboardButton(text="BotStatus", callback_data="admin_status")]
     ])
     await callback.message.edit_text("ADMIN PANEL\n-----------------------------------------", parse_mode="Markdown", reply_markup=admin_markup)
     await callback.answer()
