@@ -28,7 +28,7 @@ def keep_alive():
     t.start()
 
 # --- Bot Configuration ---
-BOT_TOKEN = "9046722307:AAEGYeQsoPeLiiwcR1Q1RvkRrdm70u8G3VE"
+BOT_TOKEN = "9046722307:AAEGYeQsoPeLiiwcR1RvkRrdm70u8G3VE"
 MONGO_URI = "mongodb+srv://mdmafug5078_db_user:3Zw3FhgLlmUhF2sF@cluster0.gzd3tr1.mongodb.net/otp_shop_bot?retryWrites=true&w=majority"
 ADMIN_ID = 7310456453  # Your Fixed Admin ID
 NOTIFICATION_CHANNEL = "@QuickTaskPay"  
@@ -65,6 +65,7 @@ class PaymentSettingsState(StatesGroup):
     waiting_for_nagad = State()
     waiting_for_min_deposit = State()
     waiting_for_support = State()
+    waiting_for_how_to_work = State()
 
 class BroadcastState(StatesGroup):
     waiting_for_message = State()
@@ -82,10 +83,11 @@ async def get_bot_settings():
     if not settings:
         default_settings = {
             "type": "payment_numbers", 
-            "bkash": "01712345678", 
-            "nagad": "01812345678",
-            "min_deposit": 50.0,
-            "support": "@mh_mafug"
+            "bkash": "01610184434", 
+            "nagad": "01610184434",
+            "min_deposit": 20.0,
+            "support": "@mh_mafug",
+            "how_to_work": "How to work video/link is not set by admin yet."
         }
         await settings_collection.insert_one(default_settings)
         return default_settings
@@ -131,6 +133,7 @@ async def check_user_access(user_id: int):
 async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
+    user_full_name = message.from_user.full_name
     
     settings = await get_bot_settings()
     support_user = settings.get("support", "@mh_mafug")
@@ -150,7 +153,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
         user = {"balance": 0.0}
 
     caption = (
-        f"Welcome to Number Shop, EARN WITH MAFUG!\n\n"
+        f"Welcome to Number Shop, {user_full_name}!\n\n"
         f"Your Balance: ৳{user.get('balance', 0.0)}\n"
         f"User ID: `{user_id}`\n\n"
         f"Instant automated accounts & OTP delivery.\n"
@@ -200,8 +203,8 @@ async def support_handler(message: types.Message):
         
     await message.answer(f"Customer Support:\n👉 {support_user}", parse_mode="Markdown", reply_markup=get_main_keyboard(user_id))
 
-@dp.message(F.text.in_(["My Referral", "How to Work"]))
-async def general_features(message: types.Message):
+@dp.message(F.text == "How to Work")
+async def how_to_work_handler(message: types.Message):
     user_id = message.from_user.id
     settings = await get_bot_settings()
     support_user = settings.get("support", "@mh_mafug")
@@ -210,7 +213,20 @@ async def general_features(message: types.Message):
     if user and user.get("isBanned", False):
         return await message.answer(f"You are banned from this bot!\nFor support contact: {support_user}")
         
-    await message.answer(f"{message.text} feature is coming soon!", parse_mode="Markdown", reply_markup=get_main_keyboard(user_id))
+    how_to_work_content = settings.get("how_to_work", "How to work details coming soon.")
+    await message.answer(how_to_work_content, parse_mode="Markdown", reply_markup=get_main_keyboard(user_id))
+
+@dp.message(F.text == "My Referral")
+async def referral_handler(message: types.Message):
+    user_id = message.from_user.id
+    settings = await get_bot_settings()
+    support_user = settings.get("support", "@mh_mafug")
+    
+    user = await users_collection.find_one({"userId": user_id})
+    if user and user.get("isBanned", False):
+        return await message.answer(f"You are banned from this bot!\nFor support contact: {support_user}")
+        
+    await message.answer("My Referral feature is coming soon!", parse_mode="Markdown", reply_markup=get_main_keyboard(user_id))
 
 # --- Manual Deposit Flow (With Method Selection: bKash / Nagad) ---
 @dp.message(F.text == "Add Balance")
@@ -224,7 +240,7 @@ async def add_balance_start(message: types.Message, state: FSMContext):
         return await message.answer(f"You are banned from this bot!\nFor support contact: {support_user}")
     
     await state.clear()
-    min_dep = settings.get("min_deposit", 50.0)
+    min_dep = settings.get("min_deposit", 20.0)
 
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -244,7 +260,7 @@ async def add_balance_start(message: types.Message, state: FSMContext):
 async def select_deposit_method(callback: types.CallbackQuery, state: FSMContext):
     method = callback.data.replace("dep_method_", "")
     settings = await get_bot_settings()
-    min_dep = settings.get("min_deposit", 50.0)
+    min_dep = settings.get("min_deposit", 20.0)
 
     await state.update_data(deposit_method=method)
     await state.set_state(DepositState.waiting_for_amount)
@@ -272,7 +288,7 @@ async def process_deposit_amount(message: types.Message, state: FSMContext):
     except ValueError:
         return await message.reply("Invalid amount! Please enter a valid number.")
 
-    min_dep = settings.get("min_deposit", 50.0)
+    min_dep = settings.get("min_deposit", 20.0)
 
     if amount < min_dep:
         return await message.reply(f"Minimum deposit amount is {min_dep} BDT. Please enter a higher amount:")
@@ -283,7 +299,7 @@ async def process_deposit_amount(message: types.Message, state: FSMContext):
     await state.update_data(deposit_amount=amount)
     await state.set_state(DepositState.waiting_for_trxid)
 
-    target_number = settings.get("bkash", "01712345678") if method == "bKash" else settings.get("nagad", "01812345678")
+    target_number = settings.get("bkash", "01610184434") if method == "bKash" else settings.get("nagad", "01610184434")
 
     text = (
         f"Method: {method}\n"
@@ -600,6 +616,7 @@ async def admin_payment_settings(callback: types.CallbackQuery):
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Change bKash", callback_data="set_bkash"), InlineKeyboardButton(text="Change Nagad", callback_data="set_nagad")],
         [InlineKeyboardButton(text="Minimum Deposit", callback_data="set_mindep"), InlineKeyboardButton(text="Support Username", callback_data="set_support")],
+        [InlineKeyboardButton(text="How to Work Setup", callback_data="set_howtowork")],
         [InlineKeyboardButton(text="Pending Deposits", callback_data="admin_pending_deps")],
         [InlineKeyboardButton(text="Back", callback_data="admin_back")]
     ])
@@ -658,7 +675,8 @@ async def save_bkash_number(message: types.Message, state: FSMContext):
             "bkash": new_bkash, 
             "nagad": settings.get("nagad"), 
             "min_deposit": settings.get("min_deposit"),
-            "support": settings.get("support")
+            "support": settings.get("support"),
+            "how_to_work": settings.get("how_to_work")
         }},
         upsert=True
     )
@@ -686,7 +704,8 @@ async def save_nagad_number(message: types.Message, state: FSMContext):
             "bkash": settings.get("bkash"), 
             "nagad": new_nagad, 
             "min_deposit": settings.get("min_deposit"),
-            "support": settings.get("support")
+            "support": settings.get("support"),
+            "how_to_work": settings.get("how_to_work")
         }},
         upsert=True
     )
@@ -698,7 +717,7 @@ async def prompt_set_mindep(callback: types.CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
         return
     await state.set_state(PaymentSettingsState.waiting_for_min_deposit)
-    await callback.message.answer("Please enter the new Minimum Deposit amount (e.g. 50):", parse_mode="Markdown")
+    await callback.message.answer("Please enter the new Minimum Deposit amount (e.g. 20):", parse_mode="Markdown")
     await callback.answer()
 
 @dp.message(PaymentSettingsState.waiting_for_min_deposit)
@@ -717,7 +736,8 @@ async def save_min_deposit(message: types.Message, state: FSMContext):
             "bkash": settings.get("bkash"), 
             "nagad": settings.get("nagad"), 
             "min_deposit": new_min,
-            "support": settings.get("support")
+            "support": settings.get("support"),
+            "how_to_work": settings.get("how_to_work")
         }},
         upsert=True
     )
@@ -747,12 +767,42 @@ async def save_support_username(message: types.Message, state: FSMContext):
             "bkash": settings.get("bkash"), 
             "nagad": settings.get("nagad"), 
             "min_deposit": settings.get("min_deposit"),
-            "support": new_support
+            "support": new_support,
+            "how_to_work": settings.get("how_to_work")
         }},
         upsert=True
     )
     await state.clear()
     await message.reply(f"Successfully updated Support Username to: `{new_support}`", parse_mode="Markdown")
+
+@dp.callback_query(F.data == "set_howtowork")
+async def prompt_set_howtowork(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(PaymentSettingsState.waiting_for_how_to_work)
+    await callback.message.answer("Please send the 'How to Work' text, video link, or instructions:", parse_mode="Markdown")
+    await callback.answer()
+
+@dp.message(PaymentSettingsState.waiting_for_how_to_work)
+async def save_how_to_work(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    new_content = message.text.strip()
+    settings = await get_bot_settings()
+    
+    await settings_collection.update_one(
+        {"type": "payment_numbers"},
+        {"$set": {
+            "bkash": settings.get("bkash"), 
+            "nagad": settings.get("nagad"), 
+            "min_deposit": settings.get("min_deposit"),
+            "support": settings.get("support"),
+            "how_to_work": new_content
+        }},
+        upsert=True
+    )
+    await state.clear()
+    await message.reply("Successfully updated 'How to Work' content!", parse_mode="Markdown")
 
 # --- User Info Flow ---
 @dp.callback_query(F.data == "admin_user_info")
