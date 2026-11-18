@@ -1,7 +1,7 @@
 aiogram==3.3.0
 motor==3.3.2
 Flask==3.0.0
-pandas==2.1.4
+pandas==2.0.3
 openpyxl==3.1.2
 pydantic==2.5.2
 pydantic-core==2.14.6
